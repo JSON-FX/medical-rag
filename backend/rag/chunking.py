@@ -66,6 +66,18 @@ def _apply_overlap(chunks: list[str], overlap: int) -> list[str]:
 
 
 def chunk_pages(pages: list[PageText], cfg: ChunkConfig) -> list[ChunkDraft]:
+    """Chunks never span a page boundary, so every chunk carries an exact page
+    number for citation.
+
+    Size contract: each chunk holds up to ``cfg.size`` characters of new text,
+    plus up to ``cfg.overlap`` characters repeated from the tail of the previous
+    chunk on the same page. The effective maximum length is therefore
+    ``cfg.size + cfg.overlap``, not ``cfg.size``. At the real configuration
+    (1000/150) that is 1150 characters, roughly 300 tokens — far inside the
+    embedding model's window.
+    """
+    if cfg.size <= 0:
+        raise ValueError(f"chunk size must be positive, got {cfg.size}")
     drafts: list[ChunkDraft] = []
     index = 0
     for page in pages:
