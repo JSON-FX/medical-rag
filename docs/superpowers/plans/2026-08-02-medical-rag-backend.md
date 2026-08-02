@@ -358,6 +358,22 @@ def test_health_reports_missing_model(client, monkeypatch):
     assert body["models"]["embed"] is True
 
 
+def test_a_different_tag_of_the_same_model_is_not_a_match(client, monkeypatch):
+    """`llama3.1:70b` must NOT satisfy a requirement for `llama3.1:8b`.
+
+    Reporting it present would send the user into a demo whose chat endpoint
+    404s on a tag health already vouched for.
+    """
+    import chat.views as views
+    monkeypatch.setattr(
+        views,
+        "build_client",
+        lambda cfg: FakeOllama(["llama3.1:70b", "llama3.1:8b-instruct-q4_0"]),
+    )
+    body = json.loads(client.get("/api/health/").content)
+    assert body["models"]["chat"] is False
+
+
 def test_health_reports_unreachable_without_raising(client, monkeypatch):
     import chat.views as views
     monkeypatch.setattr(views, "build_client", lambda cfg: FakeOllama([], reachable=False))
@@ -436,9 +452,20 @@ def build_client(cfg):
 
 
 def _has_model(available: list[str], wanted: str) -> bool:
-    """`ollama list` reports `name:latest` for an untagged pull."""
-    wanted_base = wanted.split(":")[0]
-    return any(name == wanted or name.split(":")[0] == wanted_base for name in available)
+    """`ollama list` reports `name:latest` for an untagged pull.
+
+    Only the `:latest` suffix is normalised. Stripping the tag wholesale would
+    make `llama3.1:70b` satisfy a request for `llama3.1:8b`, so health would
+    report the model present and the failure would resurface later as an
+    unexplained 404 from the chat endpoint — the precise false confidence this
+    endpoint exists to prevent.
+    """
+
+    def normalise(name: str) -> str:
+        return name[: -len(":latest")] if name.endswith(":latest") else name
+
+    target = normalise(wanted)
+    return any(normalise(name) == target for name in available)
 
 
 @require_GET
