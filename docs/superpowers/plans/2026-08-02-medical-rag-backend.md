@@ -562,6 +562,8 @@ can show an actionable message instead of a mystery failure."
 `backend/tests/unit/test_chunking.py`:
 
 ```python
+import pytest
+
 from rag.chunking import PageText, ChunkDraft, chunk_pages
 from rag.config import ChunkConfig
 
@@ -618,7 +620,29 @@ def test_no_chunk_greatly_exceeds_configured_size():
 def test_empty_document_yields_no_chunks():
     assert chunk_pages([], CFG) == []
     assert chunk_pages([PageText(1, "")], CFG) == []
+
+
+def test_overlap_is_added_on_top_of_size_not_carved_out_of_it():
+    """Documents the size contract: max chunk length is size + overlap.
+
+    Pinned deliberately. If this ever changes, chunk boundaries shift and the
+    Phase 3 threshold sweep is no longer comparable to earlier runs.
+    """
+    page = PageText(1, "x" * 250)
+    chunks = chunk_pages([page], ChunkConfig(size=100, overlap=20))
+    assert max(len(c.text) for c in chunks) == 120
+    assert all(len(c.text) <= 100 + 20 for c in chunks)
+
+
+def test_non_positive_chunk_size_raises_rather_than_dropping_text():
+    """A negative size once made _split_recursive return [] — silently losing
+    the entire page. Losing text is unrecoverable: retrieval can never find it."""
+    for bad in (0, -1):
+        with pytest.raises(ValueError, match="positive"):
+            chunk_pages([PageText(1, "content that must not vanish")], ChunkConfig(size=bad, overlap=0))
 ```
+
+Note `test_no_chunk_greatly_exceeds_configured_size` uses `overlap=0`, which is why it does not conflict with the size+overlap contract above.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -696,6 +720,21 @@ def _apply_overlap(chunks: list[str], overlap: int) -> list[str]:
 
 
 def chunk_pages(pages: list[PageText], cfg: ChunkConfig) -> list[ChunkDraft]:
+    """Split pages into chunks that never span a page boundary.
+
+    Size contract: each chunk holds up to ``cfg.size`` characters of new text,
+    plus up to ``cfg.overlap`` characters repeated from the tail of the previous
+    chunk on the same page. The effective maximum length is therefore
+    ``cfg.size + cfg.overlap``, not ``cfg.size``. At the real configuration
+    (1000/150) that is 1150 characters, roughly 300 tokens — far inside the
+    embedding model's window.
+    """
+    if cfg.size <= 0:
+        # A negative size made range() empty, so _split_recursive returned []
+        # and dropped the page silently. Text that vanishes can never be
+        # retrieved, and no test downstream would notice.
+        raise ValueError(f"chunk size must be positive, got {cfg.size}")
+
     drafts: list[ChunkDraft] = []
     index = 0
     for page in pages:
