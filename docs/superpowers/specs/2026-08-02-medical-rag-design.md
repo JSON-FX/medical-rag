@@ -325,7 +325,7 @@ def evaluate_gate(s: GateSignals, cfg: GateConfig) -> GateDecision:
 
 `lexical_support` is true when the top fused chunk also appeared in the BM25 leg — meaning the question's actual terminology occurs in the retrieved text, not merely something semantically adjacent. This is the signal that distinguishes "metformin dosing" (present) from "metformin **pediatric** dosing" (absent) better than distance alone, because both queries land at nearly identical cosine distance from the same adult-dosing chunk.
 
-**`mean_similarity` is recorded but deliberately not part of the v1 decision rule.** The intuition — one lucky chunk looks different from a genuinely covered topic, so a large gap between top and mean suggests thin support — is plausible but unmeasured. Adding a third threshold on a hunch would mean shipping a constant nobody can defend, which is the exact failure this design is trying to avoid. It is captured in `GateSignals` and persisted in `ChatMessage.gate_signals` so the Phase 4 sweep can test whether it separates the buckets. If it does, it earns a rule then; if not, it stays observability. Same reasoning applies to the deferred graded-overlap score in §17.
+**`mean_similarity` is recorded but deliberately not part of the v1 decision rule.** The intuition — one lucky chunk looks different from a genuinely covered topic, so a large gap between top and mean suggests thin support — is plausible but unmeasured. Adding a third threshold on a hunch would mean shipping a constant nobody can defend, which is the exact failure this design is trying to avoid. It is captured in `GateSignals` and persisted in `ChatMessage.gate_signals` so the Phase 3 sweep can test whether it separates the buckets. If it does, it earns a rule then; if not, it stays observability. Same reasoning applies to the deferred graded-overlap score in §17.
 
 The starting threshold values are **guesses**, exactly as PRD §17 warns. The design's contribution is making them *measurable* (§13), not pretending they are known.
 
@@ -584,12 +584,12 @@ Extends PRD §15. Each phase ends in a working, demoable state.
 | **0 — Setup** | `uv` + Python 3.12; Django + Next.js scaffolds; CORS; `uvicorn`; Ollama `PATH` handling; **pull both models**; FTS5 availability check; `/api/health/` |
 | **1 — Ingestion** | `Document`/`Chunk` models; FTS5 migration + triggers; chunking; embeddings; Chroma adapter with cosine assertion; upload/list/delete; cleanup + `reconcile_vectors`; documents UI |
 | **2 — Retrieval & gate** | FTS5 search + sanitiser; RRF; gate; prompts; Ollama streaming; sentinel buffering; NDJSON view; **backend answer/decline path complete and `curl`-able** |
-| **3 — Chat UI** | NDJSON reader; streaming message list; citation chips; decline card; disclaimer; health banner; loading/error states |
-| **4 — Eval** | Fixture corpus; `questions.yaml`; `run_eval.py`; threshold sweep; commit `eval_results.md`; **set real defaults** |
+| **3 — Eval** | Fixture corpus; `questions.yaml`; `run_eval.py`; threshold sweep; commit `eval_results.md`; **set real defaults** |
+| **4 — Chat UI** | NDJSON reader; streaming message list; citation chips; decline card; disclaimer; health banner; loading/error states |
 | **5 — Hardening** | E2E; contract suite; session replay endpoint; README with architecture narrative |
 | **6 — Stretch** | Medical-tuned model comparison (PRD §5 note); larger-model comparison on the 36 GB machine |
 
-Phase 4 must follow Phase 3, not precede it: the sweep needs the real end-to-end path, and its output changes the shipped defaults.
+**Eval precedes the chat UI deliberately.** `run_eval.py` drives the `rag/` library directly and needs nothing from the frontend, so it is unblocked the moment Phase 2 lands. Building chat UI against unmeasured thresholds is the costly ordering: every odd decline is then ambiguous between a frontend bug and a bad constant, and the thresholds move underneath the UI once the sweep finally runs. Fixing the operating point first gives the frontend stable backend behaviour to build against.
 
 ---
 
@@ -620,7 +620,7 @@ Unchanged from the PRD: stack, non-goals, chunk sizing, `top_k=4`, history cap, 
 
 **Carried from the PRD:**
 
-- **Thresholds are unmeasured.** Explicitly placeholders until Phase 4. §13 is the mitigation, not a claim that the problem is solved.
+- **Thresholds are unmeasured.** Explicitly placeholders until Phase 3. §13 is the mitigation, not a claim that the problem is solved.
 - **No single layer is airtight.** Two stages reduce failure rate; they do not eliminate it. An 8B model can still stray. Worth stating plainly in an interview rather than overselling.
 
 **New to this design:**
