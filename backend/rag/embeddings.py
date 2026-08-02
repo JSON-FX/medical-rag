@@ -17,19 +17,23 @@ DOCUMENT_PREFIX = "search_document: "
 QUERY_PREFIX = "search_query: "
 
 
-def _http_transport(url: str, payload: dict) -> dict:
+def _http_transport(url: str, payload: dict, timeout: float) -> dict:
     try:
-        resp = httpx.post(url, json=payload, timeout=120.0)
+        resp = httpx.post(url, json=payload, timeout=timeout)
         resp.raise_for_status()
+        return resp.json()
     except httpx.HTTPError as exc:
         raise OllamaUnavailable(f"embed request failed: {exc}") from exc
-    return resp.json()
+    except ValueError as exc:  # json.JSONDecodeError subclasses ValueError
+        raise OllamaUnavailable(f"embed response was not valid JSON: {exc}") from exc
 
 
 class OllamaEmbedder:
     def __init__(self, cfg: OllamaConfig, transport: Callable[[str, dict], dict] | None = None):
         self.cfg = cfg
-        self._transport = transport or _http_transport
+        self._transport = transport or (
+            lambda url, payload: _http_transport(url, payload, cfg.request_timeout_s)
+        )
 
     def _embed(self, inputs: list[str]) -> list[list[float]]:
         if not inputs:
@@ -38,6 +42,12 @@ class OllamaEmbedder:
             f"{self.cfg.host}/api/embed", {"model": self.cfg.embed_model, "input": inputs}
         )
         vectors = body.get("embeddings", [])
+        if len(vectors) != len(inputs):
+            raise ValueError(
+                f"{self.cfg.embed_model} returned {len(vectors)} embeddings for "
+                f"{len(inputs)} inputs. Refusing to continue: mismatched counts would "
+                f"misalign chunk text with vectors and silently poison the store."
+            )
         for vector in vectors:
             if len(vector) != self.cfg.embed_dimensions:
                 raise ValueError(
