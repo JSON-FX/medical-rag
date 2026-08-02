@@ -77,3 +77,35 @@ def test_query_on_empty_collection_returns_empty_list(store):
 def test_upsert_with_no_ids_is_a_noop(store):
     store.upsert([], [], [])
     assert store.count() == 0
+
+
+def test_query_with_non_positive_n_results_returns_empty_not_crash(store):
+    """Chroma raises TypeError on n_results<=0; callers get [] instead."""
+    store.upsert(["1_0"], [_vec(1.0)], [{"document_id": 1, "chunk_index": 0}])
+    assert store.query(_vec(1.0), n_results=0) == []
+    assert store.query(_vec(1.0), n_results=-1) == []
+
+
+def test_query_tolerates_n_results_larger_than_collection(store):
+    """Verified against chromadb 1.5.9: over-asking returns fewer, never raises."""
+    store.upsert(["1_0"], [_vec(1.0)], [{"document_id": 1, "chunk_index": 0}])
+    hits = store.query(_vec(1.0), n_results=50)
+    assert len(hits) == 1
+
+
+def test_delete_document_returns_number_removed(store):
+    store.upsert(
+        ids=["7_0", "7_1", "8_0"],
+        embeddings=[_vec(1.0), _vec(0.9), _vec(0.5)],
+        metadatas=[
+            {"document_id": 7, "chunk_index": 0},
+            {"document_id": 7, "chunk_index": 1},
+            {"document_id": 8, "chunk_index": 0},
+        ],
+    )
+    assert store.delete_document(7) == 2
+    assert store.all_ids() == {"8_0"}
+
+
+def test_delete_document_for_unknown_id_returns_zero(store):
+    assert store.delete_document(999) == 0
