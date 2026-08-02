@@ -38,7 +38,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'corsheaders',
-    # 'documents',  # added in Task 6
+    'documents',  # added in Task 6
     'chat',  # added in Task 2
 ]
 
