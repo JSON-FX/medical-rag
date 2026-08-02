@@ -39,7 +39,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'corsheaders',
     # 'documents',  # added in Task 6
-    # 'chat',  # added in Task 15
+    'chat',  # added in Task 2
 ]
 
 MIDDLEWARE = [
