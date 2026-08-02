@@ -65,3 +65,19 @@ def test_health_reports_unreachable_without_raising(client, monkeypatch):
     assert resp.status_code == 200          # health must not 500 when Ollama is down
     assert body["ollama_reachable"] is False
     assert body["models"]["chat"] is False
+
+
+def test_a_different_tag_of_the_same_model_is_not_a_match(client, monkeypatch):
+    """`llama3.1:70b` must NOT satisfy a requirement for `llama3.1:8b`.
+
+    Reporting it present would send the user into a demo whose chat endpoint
+    404s on a tag health already vouched for.
+    """
+    import chat.views as views
+    monkeypatch.setattr(
+        views,
+        "build_client",
+        lambda cfg: FakeOllama(["llama3.1:70b", "llama3.1:8b-instruct-q4_0"]),
+    )
+    body = json.loads(client.get("/api/health/").content)
+    assert body["models"]["chat"] is False
