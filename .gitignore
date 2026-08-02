@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Project data stores (see design spec §3.2)
+backend/chroma_db/
+backend/media/
+backend/db.sqlite3
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+frontend/test-results/
+frontend/playwright-report/
+
+# Env
+.env
+.env.local
