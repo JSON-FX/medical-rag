@@ -1113,11 +1113,20 @@ class ChromaStore:
         self._collection.upsert(ids=ids, embeddings=embeddings, metadatas=metadatas)
 
     def query(self, embedding: list[float], n_results: int) -> list[VectorHit]:
-        if self.count() == 0:
+        """Nearest neighbours, closest first.
+
+        No count() guard or clamp here deliberately. Verified against chromadb
+        1.5.9: querying an empty collection returns [[]] and an n_results larger
+        than the collection simply returns fewer rows — neither raises. The only
+        input Chroma rejects is n_results <= 0, which is what this guards.
+        Clamping with count() previously added two backend round-trips per query
+        and a TOCTOU window that could drive n_results to zero and crash.
+        """
+        if n_results <= 0:
             return []
         result = self._collection.query(
             query_embeddings=[embedding],
-            n_results=min(n_results, self.count()),
+            n_results=n_results,
             include=["distances"],
         )
         ids = result["ids"][0]
@@ -1125,9 +1134,13 @@ class ChromaStore:
         return [VectorHit(chunk_id=i, distance=float(d)) for i, d in zip(ids, distances)]
 
     def delete_document(self, document_id: int) -> int:
-        before = self.count()
-        self._collection.delete(where={"document_id": document_id})
-        return before - self.count()
+        """Delete every vector for a document, returning how many went.
+
+        Uses Chroma's atomic {"deleted": N} result rather than diffing count()
+        before and after, which is wrong under any interleaved mutation.
+        """
+        result = self._collection.delete(where={"document_id": document_id})
+        return (result or {}).get("deleted", 0)
 
     def all_ids(self) -> set[str]:
         """Used by reconcile_vectors (Task 9)."""
