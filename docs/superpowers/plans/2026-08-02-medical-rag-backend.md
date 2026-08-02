@@ -26,6 +26,8 @@ Every task's requirements implicitly include this section.
 - **Chroma must be configured for cosine space explicitly.** It defaults to L2. With cosine, `similarity = 1 - distance`.
 - **`rag/` must not import `django`.** Enforced by a test.
 - **SQLite FTS5 is available** (verified: `ENABLE_FTS5`, SQLite 3.51.0). Tokenizer is `porter unicode61`.
+- **Resolved dependency versions** (installed in Task 1): Python 3.12.13, Django 5.2.16, chromadb 1.5.9.
+- **Chroma collection names must be ≥3 characters** — chromadb 1.5.9 raises `InvalidArgumentError` otherwise.
 - **`bm25()` returns negative values** where more-negative is a better match (verified). Never compare it to a similarity; use rank position only.
 - **All views are synchronous `def`.** Django runs them in a threadpool under ASGI; ORM usage is unchanged.
 - **`ATOMIC_REQUESTS` stays off.** Transactions are explicit and narrow, or a stream holds one open for its full duration.
@@ -904,10 +906,26 @@ def _vec(seed: float) -> list[float]:
 
 
 def test_collection_uses_cosine_space_not_the_l2_default():
-    """Chroma defaults to L2. The whole gate depends on cosine (spec 6.4)."""
+    """Chroma defaults to L2. The whole gate depends on cosine (spec 6.4).
+
+    Verified empirically on chromadb 1.5.9: with no configuration, two opposite
+    unit vectors sit at distance 4.0 (L2 squared); with cosine they sit at 2.0.
+    """
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
-        assert ChromaStore(path=tmp, collection_name="c").space == "cosine"
+        assert ChromaStore(path=tmp, collection_name="spacecheck").space == "cosine"
+
+
+def test_opposite_vectors_are_distance_two_proving_cosine_not_l2(store):
+    """The behavioural counterpart to the config assertion above: L2 would
+    give 4.0 here, so this fails loudly if the space silently reverts."""
+    store.upsert(
+        ids=["1_0", "1_1"],
+        embeddings=[_vec(1.0), [-1.0] + [0.0] * 7],
+        metadatas=[{"document_id": 1, "chunk_index": 0}, {"document_id": 1, "chunk_index": 1}],
+    )
+    hits = store.query([1.0] + [0.0] * 7, n_results=2)
+    assert hits[1].distance == pytest.approx(2.0, abs=1e-3)
 
 
 def test_upsert_then_query_returns_nearest_first(store):
@@ -995,13 +1013,18 @@ class ChromaStore:
 
     @property
     def space(self) -> str:
-        """Read back the configured space. The key has moved across Chroma
-        releases, so check both known locations before giving up."""
-        meta = self._collection.metadata or {}
-        if "hnsw:space" in meta:
-            return meta["hnsw:space"]
+        """Read back the configured space.
+
+        `configuration_json` is authoritative on chromadb 1.5.9 — verified to
+        report the real space whichever form created the collection — whereas
+        `metadata` is populated only by the metadata form. Fall back to
+        metadata for older releases.
+        """
         config = getattr(self._collection, "configuration_json", None) or {}
-        return (config.get("hnsw") or {}).get("space", "unknown")
+        space = (config.get("hnsw") or {}).get("space")
+        if space:
+            return space
+        return (self._collection.metadata or {}).get("hnsw:space", "unknown")
 
     def upsert(self, ids: list[str], embeddings: list[list[float]], metadatas: list[dict]) -> None:
         if not ids:
@@ -1036,9 +1059,19 @@ class ChromaStore:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/unit/test_vectorstore.py -v`
-Expected: PASS — 7 tests
+Expected: PASS — 8 tests
 
-If `test_collection_uses_cosine_space_not_the_l2_default` fails, the installed Chroma version expects a different configuration key. Check `uv run python -c "import chromadb; print(chromadb.__version__)"` and adjust the `get_or_create_collection` call and the `space` property together. **Do not delete the assertion** — it exists precisely to catch this.
+**Verified against the installed chromadb 1.5.9 before this plan was executed** — you should not need to adjust anything, but if the assertion fails, adjust the `get_or_create_collection` call and the `space` property together and **do not delete the assertion**; it exists precisely to catch a silent revert to L2.
+
+Measured facts for this version:
+
+| Creation form | `configuration_json.hnsw.space` | `metadata` | Opposite-vector distance |
+|---|---|---|---|
+| `metadata={"hnsw:space": "cosine"}` | `cosine` | populated | 2.0 ✅ |
+| `configuration={"hnsw": {"space": "cosine"}}` | `cosine` | empty | 2.0 ✅ |
+| **omitted (default)** | **`l2`** | empty | **4.0** ❌ |
+
+Also note: **chromadb 1.5.9 rejects collection names shorter than 3 characters** with `InvalidArgumentError`. Every collection name in this plan (`medical_documents`, `test_docs`, `test`, `spacecheck`) satisfies that.
 
 - [ ] **Step 5: Commit**
 
