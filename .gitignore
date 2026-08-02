@@ -1,6 +1,9 @@
 # macOS
 .DS_Store
 
+# Superpowers SDD scratch (ledger, briefs, review packages)
+.superpowers/
+
 # Python
 __pycache__/
 *.py[cod]

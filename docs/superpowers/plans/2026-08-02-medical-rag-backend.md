@@ -72,7 +72,7 @@ Every task's requirements implicitly include this section.
 ## Task 1: Backend scaffold and configuration
 
 **Files:**
-- Create: `backend/pyproject.toml`, `backend/.python-version`, `backend/manage.py`, `backend/medical_rag/{__init__,settings,urls,asgi}.py`, `backend/rag/{__init__,config}.py`, `backend/pytest.ini`, `backend/conftest.py`
+- Create: `backend/pyproject.toml`, `backend/.python-version`, `backend/manage.py`, `backend/medical_rag/{__init__,settings,urls,asgi}.py`, `backend/rag/{__init__,config}.py`, `backend/pytest.ini`, `backend/tests/__init__.py`
 - Test: `backend/tests/unit/test_config.py`, `backend/tests/unit/test_rag_purity.py`
 
 **Interfaces:**
@@ -1280,12 +1280,13 @@ table in sync."
 ## Task 7: PDF extraction and ingestion pipeline
 
 **Files:**
-- Create: `backend/documents/ingestion.py`
+- Create: `backend/documents/ingestion.py`, `backend/tests/conftest.py`
 - Test: `backend/tests/integration/test_ingestion.py`, `backend/tests/fixtures/make_fixture_pdf.py`
 
 **Interfaces:**
 - Consumes: `rag.chunking.chunk_pages`, `rag.embeddings.OllamaEmbedder`, `rag.vectorstore.ChromaStore`, `documents.models.Document`, `documents.models.Chunk`
 - Produces: `extract_pages(path) -> list[PageText]`, `ingest_document(document, embedder, store, cfg) -> Document`, `cleanup_document(document_id, store)`
+- Produces (test infrastructure, used by Tasks 8, 15, 16): `tests/conftest.py` exporting `FakeEmbedder`, `ExplodingEmbedder`, and the `fake_embedder` / `chroma_store` fixtures
 
 - [ ] **Step 1: Create a fixture PDF generator**
 
@@ -1340,49 +1341,85 @@ def make_blank_pdf(path: pathlib.Path) -> pathlib.Path:
     return make_pdf(path, [""])
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [ ] **Step 2: Write the shared test fixtures**
+
+`backend/tests/conftest.py` — the single definition of the fake embedder, imported by every later test module. Tasks 8, 15, and 16 use these fixtures rather than redefining stubs.
+
+```python
+"""Shared test fixtures.
+
+One fake embedder serves every test module. Known terms map to fixed
+orthogonal axes so cosine distances are predictable — "france" is maximally
+far from "metformin" — and everything unrecognised lands on the unrelated
+axis. Width matches the real model (768) so tests cannot pass against a
+dimensionality the production path would reject.
+"""
+import pytest
+
+from rag.vectorstore import ChromaStore
+
+DIMENSIONS = 768
+
+
+class FakeEmbedder:
+    AXES = {"metformin": 0, "atenolol": 1}
+    UNRELATED_AXIS = 2
+
+    def __init__(self):
+        self.document_batches = 0      # lets tests assert batching behaviour
+
+    def _vector(self, text: str) -> list[float]:
+        vector = [0.0] * DIMENSIONS
+        lowered = text.lower()
+        for term, axis in self.AXES.items():
+            if term in lowered:
+                vector[axis] = 1.0
+                return vector
+        vector[self.UNRELATED_AXIS] = 1.0
+        return vector
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.document_batches += 1
+        return [self._vector(t) for t in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._vector(text)
+
+
+class ExplodingEmbedder(FakeEmbedder):
+    """Simulates Ollama failing partway through ingestion."""
+
+    def embed_documents(self, texts):
+        raise RuntimeError("ollama exploded")
+
+
+@pytest.fixture
+def fake_embedder():
+    return FakeEmbedder()
+
+
+@pytest.fixture
+def chroma_store(tmp_path):
+    return ChromaStore(path=str(tmp_path / "chroma"), collection_name="test")
+```
+
+- [ ] **Step 3: Write the failing tests**
 
 `backend/tests/integration/test_ingestion.py`:
 
 ```python
-import pathlib
-
 import pytest
 from django.core.files.base import ContentFile
 
 from documents.ingestion import cleanup_document, extract_pages, ingest_document
 from documents.models import Chunk, Document
 from rag.config import load_config
-from rag.vectorstore import ChromaStore
+from tests.conftest import ExplodingEmbedder
 from tests.fixtures.make_fixture_pdf import make_blank_pdf, make_pdf
 
 pytestmark = pytest.mark.django_db
 
 CFG = load_config(env={"CHUNK_SIZE": "120", "CHUNK_OVERLAP": "20"})
-
-
-class FakeEmbedder:
-    """Deterministic 768-dim vectors; no network."""
-
-    def __init__(self):
-        self.calls = 0
-
-    def embed_documents(self, texts):
-        self.calls += 1
-        return [[float(len(t) % 10)] * 768 for t in texts]
-
-    def embed_query(self, text):
-        return [float(len(text) % 10)] * 768
-
-
-class ExplodingEmbedder(FakeEmbedder):
-    def embed_documents(self, texts):
-        raise RuntimeError("ollama exploded")
-
-
-@pytest.fixture
-def store(tmp_path):
-    return ChromaStore(path=str(tmp_path / "chroma"), collection_name="test")
 
 
 @pytest.fixture
@@ -1400,74 +1437,77 @@ def test_extract_pages_returns_one_entry_per_page(tmp_path):
     assert "page one" in pages[0].text
 
 
-def test_successful_ingest_marks_ready_with_counts(pdf_doc, store):
-    doc = ingest_document(pdf_doc, FakeEmbedder(), store, CFG)
+def test_successful_ingest_marks_ready_with_counts(pdf_doc, chroma_store, fake_embedder):
+    doc = ingest_document(pdf_doc, fake_embedder, chroma_store, CFG)
     assert doc.status == "ready"
     assert doc.page_count == 2
     assert doc.chunk_count > 0
     assert doc.chunk_count == Chunk.objects.filter(document=doc).count()
 
 
-def test_vectors_and_chunks_agree_after_ingest(pdf_doc, store):
-    doc = ingest_document(pdf_doc, FakeEmbedder(), store, CFG)
-    assert store.count() == doc.chunk_count
-    assert store.all_ids() == {c.vector_id for c in Chunk.objects.filter(document=doc)}
+def test_vectors_and_chunks_agree_after_ingest(pdf_doc, chroma_store, fake_embedder):
+    doc = ingest_document(pdf_doc, fake_embedder, chroma_store, CFG)
+    assert chroma_store.count() == doc.chunk_count
+    assert chroma_store.all_ids() == {c.vector_id for c in Chunk.objects.filter(document=doc)}
 
 
-def test_chunks_carry_real_page_numbers(pdf_doc, store):
-    ingest_document(pdf_doc, FakeEmbedder(), store, CFG)
+def test_chunks_carry_real_page_numbers(pdf_doc, chroma_store, fake_embedder):
+    ingest_document(pdf_doc, fake_embedder, chroma_store, CFG)
     assert set(Chunk.objects.values_list("page_number", flat=True)) == {1, 2}
 
 
-def test_embeddings_are_batched_in_one_call(pdf_doc, store):
-    embedder = FakeEmbedder()
-    ingest_document(pdf_doc, embedder, store, CFG)
-    assert embedder.calls == 1
+def test_embeddings_are_batched_in_one_call(pdf_doc, chroma_store, fake_embedder):
+    ingest_document(pdf_doc, fake_embedder, chroma_store, CFG)
+    assert fake_embedder.document_batches == 1
 
 
-def test_pdf_with_no_extractable_text_fails_with_a_useful_message(tmp_path, store):
+def test_pdf_with_no_extractable_text_fails_with_a_useful_message(
+    tmp_path, chroma_store, fake_embedder
+):
     path = make_blank_pdf(tmp_path / "scanned.pdf")
     doc = Document.objects.create(title="scanned.pdf")
     doc.file.save("scanned.pdf", ContentFile(path.read_bytes()), save=True)
 
-    result = ingest_document(doc, FakeEmbedder(), store, CFG)
+    result = ingest_document(doc, fake_embedder, chroma_store, CFG)
     assert result.status == "failed"
     assert "no extractable text" in result.error_message.lower()
     assert "ocr" in result.error_message.lower()
     assert Chunk.objects.count() == 0
-    assert store.count() == 0
+    assert chroma_store.count() == 0
 
 
-def test_embedding_failure_leaves_no_orphans(pdf_doc, store):
-    result = ingest_document(pdf_doc, ExplodingEmbedder(), store, CFG)
+def test_embedding_failure_leaves_no_orphans(pdf_doc, chroma_store):
+    result = ingest_document(pdf_doc, ExplodingEmbedder(), chroma_store, CFG)
     assert result.status == "failed"
     assert "ollama exploded" in result.error_message
     assert Chunk.objects.count() == 0
-    assert store.count() == 0
+    assert chroma_store.count() == 0
 
 
-def test_reingesting_the_same_document_does_not_duplicate(pdf_doc, store):
-    first = ingest_document(pdf_doc, FakeEmbedder(), store, CFG)
+def test_reingesting_the_same_document_does_not_duplicate(
+    pdf_doc, chroma_store, fake_embedder
+):
+    first = ingest_document(pdf_doc, fake_embedder, chroma_store, CFG)
     count = first.chunk_count
-    second = ingest_document(pdf_doc, FakeEmbedder(), store, CFG)
+    second = ingest_document(pdf_doc, fake_embedder, chroma_store, CFG)
     assert second.chunk_count == count
-    assert store.count() == count
+    assert chroma_store.count() == count
     assert Chunk.objects.filter(document=pdf_doc).count() == count
 
 
-def test_cleanup_removes_from_both_stores(pdf_doc, store):
-    ingest_document(pdf_doc, FakeEmbedder(), store, CFG)
-    cleanup_document(pdf_doc.id, store)
+def test_cleanup_removes_from_both_stores(pdf_doc, chroma_store, fake_embedder):
+    ingest_document(pdf_doc, fake_embedder, chroma_store, CFG)
+    cleanup_document(pdf_doc.id, chroma_store)
     assert Chunk.objects.filter(document=pdf_doc).count() == 0
-    assert store.count() == 0
+    assert chroma_store.count() == 0
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [ ] **Step 4: Run the tests to verify they fail**
 
 Run: `uv run pytest tests/integration/test_ingestion.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'documents.ingestion'`
 
-- [ ] **Step 4: Write `documents/ingestion.py`**
+- [ ] **Step 5: Write `documents/ingestion.py`**
 
 ```python
 """Ingestion orchestration.
@@ -1564,12 +1604,12 @@ def ingest_document(document: Document, embedder, store, cfg: RagConfig) -> Docu
     return document
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/integration/test_ingestion.py -v`
 Expected: PASS — 9 tests
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add backend/documents/ingestion.py backend/tests/
@@ -1616,23 +1656,13 @@ def client():
 
 
 @pytest.fixture(autouse=True)
-def isolated_services(tmp_path, monkeypatch):
-    """Point the views at a throwaway Chroma and a fake embedder."""
+def isolated_services(chroma_store, fake_embedder, monkeypatch):
+    """Point the views at a throwaway Chroma and the shared fake embedder."""
     import documents.services as services
-    from rag.vectorstore import ChromaStore
 
-    store = ChromaStore(path=str(tmp_path / "chroma"), collection_name="test")
-
-    class FakeEmbedder:
-        def embed_documents(self, texts):
-            return [[float(len(t) % 10)] * 768 for t in texts]
-
-        def embed_query(self, text):
-            return [float(len(text) % 10)] * 768
-
-    monkeypatch.setattr(services, "get_store", lambda: store)
-    monkeypatch.setattr(services, "get_embedder", lambda: FakeEmbedder())
-    return store
+    monkeypatch.setattr(services, "get_store", lambda: chroma_store)
+    monkeypatch.setattr(services, "get_embedder", lambda: fake_embedder)
+    return chroma_store
 
 
 def _pdf_upload(tmp_path, name="mono.pdf"):
@@ -2370,7 +2400,7 @@ def test_mean_similarity_does_not_affect_the_decision():
     passing unnoticed."""
     low = evaluate_gate(signals(top=0.80, mean=0.01), CFG)
     high = evaluate_gate(signals(top=0.80, mean=0.79), CFG)
-    assert low.proceed == high.proceed == True
+    assert low.proceed is True and high.proceed is True
     assert low.reason == high.reason
 
 
@@ -2975,42 +3005,14 @@ import pytest
 from chat.retrieval import retrieve
 from documents.models import Chunk, Document
 from rag.config import load_config
-from rag.vectorstore import ChromaStore
 
 pytestmark = pytest.mark.django_db
 
 CFG = load_config(env={})
 
 
-class StubEmbedder:
-    """Maps known text to fixed vectors so distances are predictable."""
-
-    VECTORS = {
-        "metformin": [1.0, 0.0, 0.0],
-        "atenolol": [0.0, 1.0, 0.0],
-        "france": [0.0, 0.0, 1.0],
-    }
-
-    def _vector(self, text):
-        for key, vec in self.VECTORS.items():
-            if key in text.lower():
-                return vec
-        return [0.0, 0.0, 1.0]
-
-    def embed_documents(self, texts):
-        return [self._vector(t) for t in texts]
-
-    def embed_query(self, text):
-        return self._vector(text)
-
-
 @pytest.fixture
-def store(tmp_path):
-    return ChromaStore(path=str(tmp_path / "chroma"), collection_name="test")
-
-
-@pytest.fixture
-def seeded(store):
+def seeded(chroma_store, fake_embedder):
     doc = Document.objects.create(title="Monograph", status="ready")
     chunks = [
         Chunk.objects.create(document=doc, chunk_index=0, page_number=1,
@@ -3018,24 +3020,23 @@ def seeded(store):
         Chunk.objects.create(document=doc, chunk_index=1, page_number=2,
                              text="Atenolol is a beta blocker for hypertension."),
     ]
-    embedder = StubEmbedder()
-    store.upsert(
+    chroma_store.upsert(
         ids=[c.vector_id for c in chunks],
-        embeddings=embedder.embed_documents([c.text for c in chunks]),
+        embeddings=fake_embedder.embed_documents([c.text for c in chunks]),
         metadatas=[{"document_id": doc.id, "chunk_index": c.chunk_index} for c in chunks],
     )
     return doc
 
 
-def test_empty_corpus_short_circuits_before_retrieval(store):
-    result = retrieve("anything", StubEmbedder(), store, CFG)
+def test_empty_corpus_short_circuits_before_retrieval(chroma_store, fake_embedder):
+    result = retrieve("anything", fake_embedder, chroma_store, CFG)
     assert result.decision.proceed is False
     assert result.decision.reason == "empty_corpus"
     assert result.chunks == []
 
 
-def test_on_topic_question_proceeds_with_hydrated_chunks(seeded, store):
-    result = retrieve("metformin dose", StubEmbedder(), store, CFG)
+def test_on_topic_question_proceeds_with_hydrated_chunks(seeded, chroma_store, fake_embedder):
+    result = retrieve("metformin dose", fake_embedder, chroma_store, CFG)
     assert result.decision.proceed is True
     assert result.chunks
     assert "Metformin" in result.chunks[0].text
@@ -3043,28 +3044,34 @@ def test_on_topic_question_proceeds_with_hydrated_chunks(seeded, store):
     assert result.chunks[0].page_number == 1
 
 
-def test_off_domain_question_declines(seeded, store):
-    result = retrieve("what is the capital of france", StubEmbedder(), store, CFG)
+def test_off_domain_question_declines(seeded, chroma_store, fake_embedder):
+    result = retrieve("what is the capital of france", fake_embedder, chroma_store, CFG)
     assert result.decision.proceed is False
     assert result.decision.reason == "off_domain"
 
 
-def test_gate_signals_are_populated_for_observability(seeded, store):
-    result = retrieve("metformin dose", StubEmbedder(), store, CFG)
+def test_gate_signals_are_populated_for_observability(seeded, chroma_store, fake_embedder):
+    result = retrieve("metformin dose", fake_embedder, chroma_store, CFG)
     assert set(result.decision.signals) == {
         "top_similarity", "mean_similarity", "lexical_support", "corpus_empty"
     }
 
 
-def test_chunks_are_limited_to_top_k(seeded, store):
-    result = retrieve("metformin", StubEmbedder(), store, CFG)
+def test_chunks_are_limited_to_top_k(seeded, chroma_store, fake_embedder):
+    result = retrieve("metformin", fake_embedder, chroma_store, CFG)
     assert len(result.chunks) <= CFG.retrieval.top_k
 
 
-def test_vector_ids_with_no_sqlite_row_are_dropped_not_crashed(seeded, store):
+def test_vector_ids_with_no_sqlite_row_are_dropped_not_crashed(
+    seeded, chroma_store, fake_embedder
+):
     """An orphaned vector must not break a query (spec 10)."""
-    store.upsert(["999_0"], [[1.0, 0.0, 0.0]], [{"document_id": 999, "chunk_index": 0}])
-    result = retrieve("metformin dose", StubEmbedder(), store, CFG)
+    chroma_store.upsert(
+        ["999_0"],
+        fake_embedder.embed_documents(["metformin"]),
+        [{"document_id": 999, "chunk_index": 0}],
+    )
+    result = retrieve("metformin dose", fake_embedder, chroma_store, CFG)
     assert all(c.chunk_id != "999_0" for c in result.chunks)
 ```
 
@@ -3238,32 +3245,15 @@ def read_frames(response) -> list[dict]:
     return [json.loads(line) for line in body.splitlines() if line.strip()]
 
 
-class StubEmbedder:
-    VECTORS = {"metformin": [1.0, 0.0, 0.0], "france": [0.0, 0.0, 1.0]}
-
-    def _vector(self, text):
-        for key, vec in self.VECTORS.items():
-            if key in text.lower():
-                return vec
-        return [0.0, 0.0, 1.0]
-
-    def embed_documents(self, texts):
-        return [self._vector(t) for t in texts]
-
-    def embed_query(self, text):
-        return self._vector(text)
-
-
 @pytest.fixture
-def wired(tmp_path, monkeypatch):
-    """Wire the view to a throwaway store, stub embedder, and scripted LLM."""
+def wired(chroma_store, fake_embedder, monkeypatch):
+    """Wire the view to a throwaway store, the shared fake embedder, and a
+    scripted LLM. Mutate `script` in a test to change what the model returns."""
     import chat.views as views
     import documents.services as services
-    from rag.vectorstore import ChromaStore
 
-    store = ChromaStore(path=str(tmp_path / "chroma"), collection_name="test")
-    monkeypatch.setattr(services, "get_store", lambda: store)
-    monkeypatch.setattr(services, "get_embedder", lambda: StubEmbedder())
+    monkeypatch.setattr(services, "get_store", lambda: chroma_store)
+    monkeypatch.setattr(services, "get_embedder", lambda: fake_embedder)
 
     script = {"deltas": ["The adult dose ", "is 500mg [1]."]}
 
@@ -3273,19 +3263,22 @@ def wired(tmp_path, monkeypatch):
         yield from script["deltas"]
 
     monkeypatch.setattr(views, "stream_chat", fake_stream)
-    return store, script
+    return chroma_store, script
 
 
 @pytest.fixture
-def seeded(wired):
+def seeded(wired, fake_embedder):
     store, _ = wired
     doc = Document.objects.create(title="Monograph", status="ready")
     chunk = Chunk.objects.create(
         document=doc, chunk_index=0, page_number=3,
         text="Metformin adult starting dose is 500mg twice daily.",
     )
-    store.upsert([chunk.vector_id], [[1.0, 0.0, 0.0]],
-                 [{"document_id": doc.id, "chunk_index": 0}])
+    store.upsert(
+        [chunk.vector_id],
+        fake_embedder.embed_documents([chunk.text]),
+        [{"document_id": doc.id, "chunk_index": 0}],
+    )
     return doc
 
 
