@@ -31,12 +31,16 @@
 
 | axis | metformin | atenolol | amoxicillin |
 |---|---|---|---|
-| pediatric | present | **absent** | present |
-| overdose | **absent** | **absent** | present |
-| pregnancy | **absent** | **absent** | present |
-| geriatric | **absent** | present | **absent** |
-| hepatic | **absent** | **absent** | present (adverse_reactions: "Hepatic dysfunction") |
-| renal dosing | present | present | present |
+| pediatric | present (10) | **absent** | present (13) |
+| overdose | **absent** | **absent** | present (1) |
+| pregnancy | present (2) | **absent** | present (1) |
+| geriatric | **absent** | present (6) | **absent** |
+| hepatic | present (4) | present (2) | present (4) |
+| renal | present (22) | present (15) | present (11) |
+| carcinogen | **absent** | **absent** | **absent** |
+| immunization | **absent** | **absent** | **absent** |
+| driving | **absent** | **absent** | **absent** |
+| storage | **absent** | **absent** | **absent** |
 
 ---
 
@@ -149,12 +153,23 @@ from __future__ import annotations
 
 import re
 
-NEAR_MISS_AXES: dict[str, list[str]] = {
-    "pediatric": [r"pediatric", r"children", r"\bchild\b", r"infant", r"neonate", r"adolescent"],
-    "overdose": [r"overdos", r"toxicity", r"ingestion of amounts"],
-    "pregnancy": [r"pregnan", r"lactation", r"nursing", r"breast-?feed", r"teratogen"],
-    "geriatric": [r"geriatric", r"elderly", r"older patients"],
-    "hepatic": [r"hepatic impairment", r"liver impairment", r"hepatic dysfunction"],
+NEAR_MISS_AXES: dict[str, str] = {
+    # STEMS, not literal phrases. Literal matching failed twice: "hepatic
+    # impairment" missed metformin's "history of liver disease" and amoxicillin's
+    # "Liver: A moderate rise in AST", so the scan reported hepatic absent while
+    # the corpus discussed it. A false ABSENCE is the dangerous direction — it
+    # ships a near-miss that is actually answerable, counted as a false decline
+    # at every operating point.
+    "pediatric": r"pediatr|paediatr|\bchild|infant|neonat|adolescen|juvenile|newborn",
+    "overdose": r"overdos|poison|toxicit|\btoxic\b|acute ingestion",
+    "pregnancy": r"pregnan|lactat|nursing mother|breast-?feed|teratogen|fetal|foetal|\bfetus",
+    "geriatric": r"geriatr|elderly|older patient|advanced age|\b65 years",
+    "hepatic": r"hepat|\bliver\b",
+    "renal": r"renal|kidney|creatinine|eGFR|nephro",
+    "carcinogen": r"carcinogen|mutagen|tumou?r|malignan",
+    "immunization": r"immuni[sz]|vaccin",
+    "driving": r"driving|operate machinery|machinery",
+    "storage": r"\bstorage\b|store at|room temperature|excursions permitted",
 }
 
 
@@ -162,11 +177,9 @@ def verified_absent_axes(text: str) -> list[str]:
     """Axes with no keyword anywhere in `text`, sorted for stable manifests."""
     lowered = text.lower()
     return sorted(
-        axis
-        for axis, patterns in NEAR_MISS_AXES.items()
-        if not any(re.search(p, lowered) for p in patterns)
+        axis for axis, pattern in NEAR_MISS_AXES.items() if not re.search(pattern, lowered)
     )
-```
+``````
 
 - [ ] **Step 5: Run the test to verify it passes**
 
@@ -545,25 +558,25 @@ targets a `(drug, axis)` pair the manifest lists as verified absent.
 - {id: a14, bucket: answerable, expected: answer, drug: metformin,
    question: "What drug interactions are described for metformin?"}
 
-# ---------- near_miss (9) — every pair verified absent in the manifest ----------
-- {id: n01, bucket: near_miss, expected: decline, drug: metformin, axis: hepatic,
-   question: "How should metformin be dosed in patients with hepatic impairment?"}
-- {id: n02, bucket: near_miss, expected: decline, drug: atenolol, axis: hepatic,
-   question: "Does atenolol require a dose adjustment in liver impairment?"}
-- {id: n03, bucket: near_miss, expected: decline, drug: amoxicillin, axis: geriatric,
-   question: "How should amoxicillin be dosed in elderly patients?"}
-- {id: n04, bucket: near_miss, expected: decline, drug: metformin, axis: overdose,
+# ---------- near_miss (9) — every pair verified absent by STEM scan ----------
+- {id: n01, bucket: near_miss, expected: decline, drug: metformin, axis: overdose,
    question: "What should be done in the event of a metformin overdose?"}
-- {id: n05, bucket: near_miss, expected: decline, drug: atenolol, axis: overdose,
+- {id: n02, bucket: near_miss, expected: decline, drug: atenolol, axis: overdose,
    question: "How is an atenolol overdose managed?"}
-- {id: n06, bucket: near_miss, expected: decline, drug: metformin, axis: pregnancy,
-   question: "Is metformin safe to use during pregnancy?"}
-- {id: n07, bucket: near_miss, expected: decline, drug: atenolol, axis: pregnancy,
-   question: "Can atenolol be taken while breastfeeding?"}
-- {id: n08, bucket: near_miss, expected: decline, drug: atenolol, axis: pediatric,
-   question: "What is the pediatric dose of atenolol?"}
-- {id: n09, bucket: near_miss, expected: decline, drug: metformin, axis: geriatric,
+- {id: n03, bucket: near_miss, expected: decline, drug: metformin, axis: geriatric,
    question: "How should metformin be dosed in elderly patients?"}
+- {id: n04, bucket: near_miss, expected: decline, drug: amoxicillin, axis: geriatric,
+   question: "Does amoxicillin need a dose adjustment in elderly patients?"}
+- {id: n05, bucket: near_miss, expected: decline, drug: atenolol, axis: pediatric,
+   question: "What is the pediatric dose of atenolol?"}
+- {id: n06, bucket: near_miss, expected: decline, drug: atenolol, axis: pregnancy,
+   question: "Can atenolol be taken while breastfeeding?"}
+- {id: n07, bucket: near_miss, expected: decline, drug: metformin, axis: carcinogen,
+   question: "Is metformin associated with an increased cancer risk?"}
+- {id: n08, bucket: near_miss, expected: decline, drug: atenolol, axis: driving,
+   question: "Is it safe to drive while taking atenolol?"}
+- {id: n09, bucket: near_miss, expected: decline, drug: amoxicillin, axis: immunization,
+   question: "Does amoxicillin reduce the effectiveness of vaccines?"}
 
 # ---------- off_corpus_medical (9) — real drugs, none in the corpus ----------
 - {id: o01, bucket: off_corpus_medical, expected: decline,
