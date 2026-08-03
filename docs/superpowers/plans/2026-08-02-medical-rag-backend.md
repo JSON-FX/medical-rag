@@ -1678,8 +1678,31 @@ def cleanup_document(document_id: int, store) -> None:
     Chunk.objects.filter(document_id=document_id).delete()
 
 
-def ingest_document(document: Document, embedder, store, cfg: RagConfig) -> Document:
+def _safe_cleanup(document_id: int, store) -> None:
+    """Cleanup that cannot itself abort the caller's error handling.
+
+    If Chroma is unreachable, a raising cleanup inside an except block would
+    propagate and skip the status write entirely, stranding the document in
+    `processing` forever with no error message. Residual orphans are the
+    lesser evil and are what `reconcile_vectors` exists to repair.
+    """
     try:
+        cleanup_document(document_id, store)
+    except Exception:
+        logger.exception(
+            "cleanup failed for document %s; orphans may remain, run reconcile_vectors",
+            document_id,
+        )
+
+
+def ingest_document(document: Document, embedder, store, cfg: RagConfig) -> Document:
+    previous_status = document.status
+    destroyed_previous = False
+
+    try:
+        # Everything failure-prone happens BEFORE any stored data is touched, so
+        # a transient Ollama outage during re-ingest cannot destroy a document
+        # that is currently ready and searchable.
         pages = extract_pages(document.file.path)
         page_count = len(pages)
 
@@ -1689,8 +1712,9 @@ def ingest_document(document: Document, embedder, store, cfg: RagConfig) -> Docu
 
         embeddings = embedder.embed_documents([d.text for d in drafts])
 
-        # Re-ingest of an existing document must converge, not accumulate.
+        # From here on the old state is gone; re-ingest must converge, not accumulate.
         cleanup_document(document.id, store)
+        destroyed_previous = True
 
         store.upsert(
             ids=[f"{document.id}_{d.chunk_index}" for d in drafts],
@@ -1722,10 +1746,20 @@ def ingest_document(document: Document, embedder, store, cfg: RagConfig) -> Docu
 
     except Exception as exc:
         logger.exception("ingestion failed for document %s", document.id)
-        cleanup_document(document.id, store)
-        document.status = "failed"
+
+        if destroyed_previous:
+            # We had already torn down the old state, so a partial new state is
+            # all that can remain. Clear it and mark the document failed.
+            _safe_cleanup(document.id, store)
+            document.status = "failed"
+            document.chunk_count = 0
+        else:
+            # Nothing stored was touched. A document that was already ready is
+            # still complete and searchable — a transient Ollama outage during
+            # re-ingest must not cost the user a working document.
+            document.status = "failed" if previous_status != "ready" else "ready"
+
         document.error_message = str(exc)
-        document.chunk_count = 0
         document.save(update_fields=["status", "error_message", "chunk_count"])
 
     return document
