@@ -38,8 +38,9 @@ SYSTEM_TEMPLATE = """You are a clinical reference assistant for the user's uploa
 Answer only using the context below, drawn from documents the user has uploaded.
 Do not draw on general knowledge beyond what is in the context.
 
-If the context does not contain enough information to answer the question, reply with
-exactly {sentinel} and nothing else. Do not apologise, explain, or add any other text.
+If the context does not contain enough information to answer the question, your
+entire response must be the exact characters {sentinel} — nothing before it,
+nothing after it, no greeting, no explanation, no punctuation.
 
 When you do answer, cite the numbered sources you used, like [1] or [2].
 Your answers are for informational reference only and are not a substitute for
@@ -69,16 +70,27 @@ def format_context(chunks: list[ContextChunk]) -> str:
 
 
 def _trim_history(history: list[dict], max_history: int, history_chars: int) -> list[dict]:
+    """Keep the most recent turns that fit the character budget.
+
+    Skips an oversized message rather than stopping, so one long turn (a pasted
+    lab report) does not also discard smaller, older turns that would have fit.
+    Then drops any leading assistant turn: an assistant message with no user
+    message before it is malformed conversation and gives the model a reply to
+    a question it cannot see.
+    """
     recent = history[-max_history:] if max_history else []
     kept: list[dict] = []
     budget = history_chars
     for message in reversed(recent):
         cost = len(message["content"])
         if cost > budget:
-            break
+            continue
         budget -= cost
         kept.append(message)
-    return list(reversed(kept))
+    kept.reverse()
+    while kept and kept[0]["role"] == "assistant":
+        kept.pop(0)
+    return kept
 
 
 def build_messages(
@@ -88,6 +100,10 @@ def build_messages(
     max_history: int = 4,
     history_chars: int = 2000,
 ) -> list[dict]:
+    if not chunks:
+        # Answering with no retrieved context is the failure this whole system
+        # exists to prevent. Callers must decline via the gate instead.
+        raise ValueError("build_messages requires at least one context chunk")
     system = SYSTEM_TEMPLATE.format(sentinel=SENTINEL, context=format_context(chunks))
     return [
         {"role": "system", "content": system},

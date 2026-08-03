@@ -90,3 +90,44 @@ def test_history_is_also_capped_by_character_budget():
 def test_system_prompt_carries_the_medical_disclaimer():
     system = build_messages("q", _chunks(), history=[])[0]["content"]
     assert "not a substitute" in system.lower()
+
+
+def test_an_oversized_turn_does_not_discard_smaller_older_turns():
+    """One pasted lab report must not evict every other turn behind it."""
+    history = [
+        {"role": "user", "content": "earlier question"},
+        {"role": "assistant", "content": "earlier answer"},
+        {"role": "user", "content": "x" * 5000},
+        {"role": "assistant", "content": "short reply"},
+    ]
+    messages = build_messages("now", _chunks(), history, max_history=4, history_chars=200)
+    kept = [m["content"] for m in messages[1:-1]]
+    assert "earlier question" in kept, "a small older turn was dropped behind a large one"
+    assert "x" * 5000 not in kept
+
+
+def test_history_never_starts_with_an_orphaned_assistant_turn():
+    """[system, assistant, user] gives the model a reply to a question it
+    cannot see."""
+    history = [
+        {"role": "user", "content": "y" * 5000},
+        {"role": "assistant", "content": "short reply"},
+    ]
+    messages = build_messages("now", _chunks(), history, max_history=4, history_chars=200)
+    roles = [m["role"] for m in messages]
+    assert roles[0] == "system"
+    assert roles[1] != "assistant", f"orphaned assistant turn: {roles}"
+
+
+def test_sentinel_instruction_forbids_any_surrounding_text():
+    """Detection is startswith-based; a 'Sure! ' preamble would defeat it."""
+    system = build_messages("q", _chunks(), history=[])[0]["content"]
+    lowered = system.lower()
+    assert "nothing before it" in lowered
+    assert "no greeting" in lowered
+
+
+def test_build_messages_refuses_to_build_a_prompt_with_no_context():
+    """Answering ungrounded is the failure mode this system exists to prevent."""
+    with pytest.raises(ValueError, match="at least one context chunk"):
+        build_messages("what is the dose?", [], history=[])
