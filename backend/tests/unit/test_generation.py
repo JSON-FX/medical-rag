@@ -88,3 +88,54 @@ def test_stream_chat_ignores_lines_without_content():
     lines = [{"done": False}, {"message": {"content": "x"}, "done": False}, {"done": True}]
     out = list(stream_chat(OllamaConfig(), [], transport=lambda url, payload: iter(lines)))
     assert out == ["x"]
+
+
+def test_preamble_split_across_deltas_near_the_buffer_boundary_still_declines():
+    """Regression: the decision once fired at 40 chars while a tolerated
+    preamble plus the sentinel needs 44, locking in a false negative and
+    leaking the raw sentinel to the user."""
+    for preamble_length in (20, 21, 22, 23, 24):
+        preamble = "A" * preamble_length
+        stream = list(preamble + SENTINEL)          # one character per delta
+        assert events(stream) == [("declined", None)], (
+            f"preamble of {preamble_length} chars leaked the sentinel"
+        )
+
+
+def test_preamble_split_into_small_chunks_still_declines():
+    text = "A" * 23 + SENTINEL
+    chunks = [text[i : i + 3] for i in range(0, len(text), 3)]
+    assert events(chunks) == [("declined", None)]
+
+
+def test_a_preamble_longer_than_tolerance_is_not_a_decline():
+    """Beyond the tolerance it is treated as a real answer, by design."""
+    stream = list("B" * 60 + SENTINEL)
+    assert ("declined", None) not in events(stream)
+
+
+def test_malformed_json_line_becomes_ollama_unavailable(monkeypatch):
+    """A truncated NDJSON line must not leak JSONDecodeError to callers that
+    only catch OllamaError."""
+    import httpx
+
+    from rag.generation import _http_stream
+    from rag.ollama import OllamaUnavailable
+
+    class FakeStream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self):
+            yield '{"message": {"content": "ok"}, "done": false}'
+            yield '{"message": {"content": tru'          # truncated
+
+    monkeypatch.setattr(httpx, "stream", lambda *a, **k: FakeStream())
+    with pytest.raises(OllamaUnavailable, match="invalid JSON"):
+        list(_http_stream("http://x/api/chat", {}))

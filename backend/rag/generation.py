@@ -28,6 +28,8 @@ def _http_stream(url: str, payload: dict) -> Iterator[dict]:
                     yield json.loads(line)
     except httpx.HTTPError as exc:
         raise OllamaUnavailable(f"chat request failed: {exc}") from exc
+    except ValueError as exc:  # json.JSONDecodeError subclasses ValueError
+        raise OllamaUnavailable(f"chat stream returned invalid JSON: {exc}") from exc
 
 
 def stream_chat(
@@ -69,7 +71,10 @@ def filter_sentinel(
     The sentinel commonly arrives split across deltas, so the decision waits
     until the buffer holds enough characters to be conclusive.
     """
-    threshold = max(len(sentinel), buffer_chars)
+    # The buffer must be able to hold a tolerated preamble AND the full sentinel,
+    # or the decision fires before the sentinel has finished arriving, locks in a
+    # false negative, and leaks the raw token to the user.
+    threshold = max(buffer_chars, PREAMBLE_TOLERANCE + len(sentinel))
     buffer = ""
     decided = False
 
