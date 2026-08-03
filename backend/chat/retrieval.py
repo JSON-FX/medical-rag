@@ -64,12 +64,32 @@ def retrieve(question: str, embedder, store, cfg: RagConfig) -> RetrievalResult:
 
     similarities = [1.0 - hit.distance for hit in vector_hits]
     top_similarity = max(similarities) if similarities else 0.0
-    mean_similarity = sum(similarities) / len(similarities) if similarities else 0.0
 
     fused = reciprocal_rank_fusion(
         [[h.chunk_id for h in vector_hits], lexical_ids], k=cfg.retrieval.rrf_k
     )
     top_ids = [hit.chunk_id for hit in fused[: cfg.retrieval.top_k]]
+
+    # Recorded for Phase 3's eval sweep; the gate itself never reads this
+    # (pinned by test_mean_similarity_does_not_affect_the_decision in
+    # tests/unit/test_gate.py — do not wire it in here without updating that
+    # pin deliberately). Averaged over the chunks actually DELIVERED to the
+    # model (top_ids, after fusion) rather than the full per_leg candidate
+    # pool: the pool measures ANN-neighbourhood breadth, which is the wrong
+    # population for judging delivered-context quality — a chunk ranked 9th
+    # of 10 by cosine similarity but never fused into the top_k should not
+    # pull this average down, since the model never saw it. A delivered
+    # chunk found only by the lexical leg has no vector-space similarity at
+    # all and is excluded rather than treated as 0, which would understate a
+    # lexically-rescued answer instead of just reflecting that fewer of the
+    # top_k have a similarity opinion.
+    similarity_by_id = dict(zip((h.chunk_id for h in vector_hits), similarities))
+    delivered_similarities = [similarity_by_id[i] for i in top_ids if i in similarity_by_id]
+    mean_similarity = (
+        sum(delivered_similarities) / len(delivered_similarities)
+        if delivered_similarities
+        else 0.0
+    )
 
     signals = GateSignals(
         top_similarity=top_similarity,

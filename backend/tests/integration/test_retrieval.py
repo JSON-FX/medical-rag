@@ -60,6 +60,45 @@ def test_chunks_are_limited_to_top_k(seeded, chroma_store, fake_embedder):
     assert len(result.chunks) <= CFG.retrieval.top_k
 
 
+def test_mean_similarity_is_averaged_over_the_delivered_top_k_not_the_full_pool(
+    chroma_store, fake_embedder
+):
+    """Regression for the wrong-population bug: mean_similarity used to
+    average all per_leg=10 vector hits regardless of what made the cut. With
+    4 on-topic chunks and 6 unrelated filler chunks in a 10-candidate pool,
+    the old population would average in the 6 unrelated zeros (mean 0.4);
+    the corrected population is only the top_k=4 chunks actually delivered
+    to the model — mean 1.0, since FakeEmbedder gives every on-topic chunk
+    an identical, maximally similar vector.
+    """
+    doc = Document.objects.create(title="Mono", status="ready")
+    on_topic = [
+        Chunk.objects.create(
+            document=doc, chunk_index=i, page_number=1,
+            text=f"Metformin dosing guidance, section {i}.",
+        )
+        for i in range(4)
+    ]
+    filler = [
+        Chunk.objects.create(
+            document=doc, chunk_index=100 + i, page_number=1,
+            text=f"General wellness advice number {i}: drink water and rest.",
+        )
+        for i in range(6)
+    ]
+    all_chunks = on_topic + filler
+    chroma_store.upsert(
+        ids=[c.vector_id for c in all_chunks],
+        embeddings=fake_embedder.embed_documents([c.text for c in all_chunks]),
+        metadatas=[{"document_id": doc.id, "chunk_index": c.chunk_index} for c in all_chunks],
+    )
+
+    result = retrieve("metformin dosing", fake_embedder, chroma_store, CFG)
+
+    assert {c.chunk_id for c in result.chunks} == {c.vector_id for c in on_topic}
+    assert result.decision.signals["mean_similarity"] == pytest.approx(1.0)
+
+
 def test_vector_ids_with_no_sqlite_row_are_dropped_not_crashed(
     seeded, chroma_store, fake_embedder
 ):

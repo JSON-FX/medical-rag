@@ -137,10 +137,38 @@ def chat(request):
     history = _history(session, cfg.history_messages)
     ChatMessage.objects.create(session=session, role="user", content=question)
 
-    result = retrieve(question, services.get_embedder(), services.get_store(), cfg)
-
     def generate():
         yield frame("meta", session_id=str(session.id))
+
+        try:
+            # Runs INSIDE the generator, after `meta` is already on the wire.
+            # retrieve() embeds the query via Ollama before doing anything
+            # else, so an unreachable Ollama (or a missing model) surfaces
+            # here first. By this point Django can no longer fall back to a
+            # 500 page — headers are already committed — so an uncaught
+            # exception here would just truncate the connection with no
+            # valid NDJSON at all, which is worse than the debug page this
+            # used to show when the call sat outside the generator.
+            result = retrieve(question, services.get_embedder(), services.get_store(), cfg)
+        except Exception as exc:
+            # Ollama answers 404 "model ... not found" when the tag was never
+            # pulled — a different fix for the user than a dead server (spec 11).
+            code = (
+                "model_missing" if "not found" in str(exc).lower() else "ollama_unavailable"
+            )
+            yield frame("error", code=code, message=str(exc))
+            # History must stay coherent: the user turn above was already
+            # committed, so the session needs a matching assistant turn even
+            # though no answer was produced.
+            message = _persist(session, "", [], False, "", {}, True)
+            yield frame(
+                "done",
+                message_id=message.id,
+                was_declined=False,
+                decline_reason=None,
+                truncated=True,
+            )
+            return
 
         signals = result.decision.signals
 

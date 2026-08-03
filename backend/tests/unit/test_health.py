@@ -67,6 +67,43 @@ def test_health_reports_unreachable_without_raising(client, monkeypatch):
     assert body["models"]["chat"] is False
 
 
+def test_health_returns_200_when_ollama_returns_a_non_json_body(client, monkeypatch):
+    """Exercises the REAL OllamaClient end to end (build_client is not
+    replaced here): a 200 with an HTML body must not become an uncaught
+    JSONDecodeError inside the view. Regression for rag/ollama.py."""
+    import httpx
+
+    def fake_get(url, *a, **k):
+        return httpx.Response(
+            200, text="<html>bad gateway</html>", request=httpx.Request("GET", url)
+        )
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    resp = client.get("/api/health/")
+    body = json.loads(resp.content)
+    assert resp.status_code == 200
+    assert body["ollama_reachable"] is False
+
+
+def test_health_returns_200_when_ollama_returns_a_malformed_payload(client, monkeypatch):
+    """Same as above, for a 200 whose JSON is well-formed but shaped wrong
+    (a renamed `name` key), which raises KeyError rather than ValueError."""
+    import httpx
+
+    def fake_get(url, *a, **k):
+        return httpx.Response(
+            200,
+            json={"models": [{"id": "llama3.1:8b"}]},
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    resp = client.get("/api/health/")
+    body = json.loads(resp.content)
+    assert resp.status_code == 200
+    assert body["ollama_reachable"] is False
+
+
 def test_a_different_tag_of_the_same_model_is_not_a_match(client, monkeypatch):
     """`llama3.1:70b` must NOT satisfy a requirement for `llama3.1:8b`.
 

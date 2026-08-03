@@ -1,6 +1,7 @@
 import logging
 
 from django.conf import settings
+from django.db import transaction
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
@@ -82,6 +83,32 @@ def document_detail(request, document_id: int):
     if request.method != "DELETE":
         return JsonResponse({"error": "method not allowed"}, status=405)
     document = get_object_or_404(Document, pk=document_id)
-    cleanup_document(document.id, services.get_store())
-    document.delete()
+
+    # The chunk delete and the document delete must commit together or not at
+    # all. Without this, a crash between the two leaves a `ready` Document
+    # with chunk_count > 0 but zero actual Chunk rows in SQLite — invisible
+    # to reconcile_vectors, since no chunk rows means no missing vectors and
+    # no orphans either. Chroma is a separate store that cannot share this
+    # transaction (spec 10); if its delete fails or the process dies before
+    # this block commits, SQLite rolls back to the pre-delete state instead
+    # of the previously-possible split state, which reconcile_vectors can
+    # already see as "chunks missing a vector".
+    with transaction.atomic():
+        cleanup_document(document.id, services.get_store())
+        document.delete()
+
+    # FileField.delete() is NOT called by Document.delete() (Django >= 1.3
+    # stopped doing that automatically), so without this the PDF is orphaned
+    # on disk forever — the wrong wart for an app whose selling point is
+    # "nothing leaves your machine". Kept outside the transaction above: this
+    # is filesystem I/O, not a DB write, so it cannot be rolled back and
+    # would gain nothing from being inside one. save=False because the row is
+    # already gone — saving would INSERT a new row with a blank file field
+    # rather than update anything. Guarded for a Document with no file
+    # attached and for a file already missing from disk (FieldFile.delete()
+    # and FileSystemStorage.delete() already no-op on both, but explicit here
+    # rather than relied upon).
+    if document.file:
+        document.file.delete(save=False)
+
     return JsonResponse({}, status=204)

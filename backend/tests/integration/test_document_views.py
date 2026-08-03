@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -77,8 +78,57 @@ def test_delete_removes_document_chunks_and_vectors(client, tmp_path, isolated_s
     assert isolated_services.count() == 0
 
 
+def test_delete_removes_the_pdf_file_from_disk(client, tmp_path):
+    """Document.delete() alone does not delete the FileField's file (Django
+    >= 1.3 stopped doing that automatically), so without the view explicitly
+    removing it, every deleted document leaves its PDF on disk forever."""
+    created = json.loads(client.post("/api/documents/", {"file": _pdf_upload(tmp_path)}).content)
+    file_path = Document.objects.get(id=created["id"]).file.path
+    assert os.path.exists(file_path)
+
+    resp = client.delete(f"/api/documents/{created['id']}/")
+    assert resp.status_code == 204
+    assert not os.path.exists(file_path)
+
+
+def test_delete_succeeds_when_the_file_is_already_missing_from_disk(client, tmp_path):
+    """Guards the file-delete step: a file removed out of band (manual
+    cleanup, a prior partial failure) must not turn DELETE into a 500."""
+    created = json.loads(client.post("/api/documents/", {"file": _pdf_upload(tmp_path)}).content)
+    file_path = Document.objects.get(id=created["id"]).file.path
+    os.remove(file_path)
+
+    resp = client.delete(f"/api/documents/{created['id']}/")
+    assert resp.status_code == 204
+    assert Document.objects.count() == 0
+
+
 def test_delete_missing_document_returns_404(client):
     assert client.delete("/api/documents/999/").status_code == 404
+
+
+def test_delete_is_atomic_the_document_survives_if_cleanup_fails(
+    client, tmp_path, isolated_services, monkeypatch
+):
+    """transaction.atomic() around the chunk delete + document delete: a
+    failure partway through must roll back to the pre-delete state rather
+    than leave a `ready` document with chunk_count > 0 and zero actual chunk
+    rows — the state reconcile_vectors' ghost-ready check now has to exist
+    for in the first place."""
+    created = json.loads(client.post("/api/documents/", {"file": _pdf_upload(tmp_path)}).content)
+
+    import documents.views as views
+
+    def boom(document_id, store):
+        raise RuntimeError("chroma unreachable")
+
+    monkeypatch.setattr(views, "cleanup_document", boom)
+
+    with pytest.raises(RuntimeError):
+        client.delete(f"/api/documents/{created['id']}/")
+
+    assert Document.objects.filter(id=created["id"], status="ready").exists()
+    assert Chunk.objects.filter(document_id=created["id"]).exists()
 
 
 def test_service_initialisation_failure_creates_no_stranded_document(tmp_path, monkeypatch):

@@ -11,7 +11,7 @@ from typing import Callable
 import httpx
 
 from .config import OllamaConfig
-from .ollama import OllamaUnavailable
+from .ollama import OllamaProtocolError, OllamaUnavailable
 
 DOCUMENT_PREFIX = "search_document: "
 QUERY_PREFIX = "search_query: "
@@ -43,14 +43,14 @@ class OllamaEmbedder:
         )
         vectors = body.get("embeddings", [])
         if len(vectors) != len(inputs):
-            raise ValueError(
+            raise OllamaProtocolError(
                 f"{self.cfg.embed_model} returned {len(vectors)} embeddings for "
                 f"{len(inputs)} inputs. Refusing to continue: mismatched counts would "
                 f"misalign chunk text with vectors and silently poison the store."
             )
         for vector in vectors:
             if len(vector) != self.cfg.embed_dimensions:
-                raise ValueError(
+                raise OllamaProtocolError(
                     f"expected {self.cfg.embed_dimensions}-dim embeddings from "
                     f"{self.cfg.embed_model}, got {len(vector)}"
                 )

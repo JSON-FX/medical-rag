@@ -50,8 +50,22 @@ def test_empty_document_list_makes_no_request():
 
 
 def test_dimension_mismatch_is_rejected_loudly():
-    """A wrong embed model silently produces wrong-width vectors; fail fast."""
+    """A wrong embed model silently produces wrong-width vectors; fail fast.
+
+    Raised as `OllamaProtocolError`, which subclasses both `OllamaError` and
+    `ValueError` (see rag/ollama.py), so this assertion stays meaningful
+    without change even though the raised type is no longer a bare ValueError.
+    """
     with pytest.raises(ValueError, match="768"):
+        OllamaEmbedder(CFG, transport=SpyTransport(dims=384)).embed_documents(["a"])
+
+
+def test_dimension_mismatch_is_also_catchable_as_ollama_error():
+    """A caller that correctly catches the documented transport-failure type
+    (OllamaError) must not have this leak past it as a bare ValueError."""
+    from rag.ollama import OllamaError
+
+    with pytest.raises(OllamaError, match="768"):
         OllamaEmbedder(CFG, transport=SpyTransport(dims=384)).embed_documents(["a"])
 
 
@@ -64,6 +78,17 @@ def test_short_embedding_response_raises_rather_than_misaligning():
             return {"embeddings": [[0.1] * 768]}  # 1 vector for N inputs
 
     with pytest.raises(ValueError, match="misalign"):
+        OllamaEmbedder(CFG, transport=ShortTransport()).embed_documents(["a", "b", "c"])
+
+
+def test_count_mismatch_is_also_catchable_as_ollama_error():
+    from rag.ollama import OllamaError
+
+    class ShortTransport:
+        def __call__(self, url, payload):
+            return {"embeddings": [[0.1] * 768]}
+
+    with pytest.raises(OllamaError, match="misalign"):
         OllamaEmbedder(CFG, transport=ShortTransport()).embed_documents(["a", "b", "c"])
 
 

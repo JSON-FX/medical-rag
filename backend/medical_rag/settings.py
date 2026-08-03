@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -19,13 +20,22 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
+# Threat model: this app is designed to be run by a single local user, bound
+# to localhost only, with no authentication layer anywhere (see README —
+# "Scope"). It is not meant to be exposed beyond that, and it is not meant to
+# hold real PHI. The defaults below (an insecure key, DEBUG on, permissive
+# hosts) are only safe under that model; they are not production settings
+# with the env vars unset, they are what "local dev tool" looks like. Anyone
+# running this somewhere reachable by more than its one local user must set
+# DJANGO_SECRET_KEY / DJANGO_DEBUG / DJANGO_ALLOWED_HOSTS accordingly.
+
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-%kz#q(p=2p-=v+6h0hjbiojd24)txq)3pv(qah7+usch4u858^'
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-local-dev-only-do-not-deploy")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver").split(",")
 
 
 # Application definition

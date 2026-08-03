@@ -28,12 +28,33 @@ class Command(BaseCommand):
         missing_vectors = set(chunks) - vector_ids     # chunk row, no vector
         orphan_vectors = vector_ids - set(chunks)      # vector, no chunk row
 
-        if not missing_vectors and not orphan_vectors:
+        # A Document can read `ready` with chunk_count > 0 while having ZERO
+        # actual Chunk rows — e.g. a crash between the chunk delete and the
+        # document delete in the DELETE view (now wrapped in
+        # transaction.atomic(), but this is defence in depth for any other
+        # partial write that reaches the same state). Neither check above can
+        # see it: no chunk rows at all means nothing can be missing a vector
+        # and nothing can be an orphan, so without this the command would
+        # report "No drift" over a document that is completely unsearchable.
+        chunked_document_ids = {c.document_id for c in chunks.values()}
+        ghost_ready_ids = list(
+            Document.objects.filter(status="ready", chunk_count__gt=0)
+            .exclude(id__in=chunked_document_ids)
+            .order_by("id")
+            .values_list("id", flat=True)
+        )
+
+        if not missing_vectors and not orphan_vectors and not ghost_ready_ids:
             self.stdout.write(self.style.SUCCESS("No drift: SQLite and Chroma agree."))
             return
 
         self.stdout.write(f"{len(missing_vectors)} chunk(s) missing a vector")
         self.stdout.write(f"{len(orphan_vectors)} vector(s) orphaned with no chunk row")
+        if ghost_ready_ids:
+            self.stdout.write(
+                f"{len(ghost_ready_ids)} document(s) marked ready with chunk_count > 0 "
+                "but zero actual chunk rows"
+            )
 
         if not options["fix"]:
             self.stdout.write(self.style.WARNING("Run with --fix to repair."))
@@ -63,5 +84,18 @@ class Command(BaseCommand):
                 status="failed", error_message=REUPLOAD_MESSAGE
             )
             self.stdout.write(f"marked {len(affected)} document(s) failed")
+
+        # A ghost `ready` document has no chunk rows to point at — there is no
+        # vector-level repair target, only re-ingestion. Reuses the
+        # missing-vectors message: from the user's side it is the identical
+        # instruction. Runs independently of both branches above for the same
+        # reason the missing-vectors branch runs independently of the orphan
+        # one: one kind of drift having a problem must not block repair of
+        # another.
+        if ghost_ready_ids:
+            Document.objects.filter(id__in=ghost_ready_ids).update(
+                status="failed", error_message=REUPLOAD_MESSAGE
+            )
+            self.stdout.write(f"marked {len(ghost_ready_ids)} ghost ready document(s) failed")
 
         self.stdout.write(self.style.SUCCESS("Repair complete."))

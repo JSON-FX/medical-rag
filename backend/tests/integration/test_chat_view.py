@@ -177,6 +177,74 @@ def test_ollama_failure_persists_a_truncated_message(seeded, wired):
     assert ChatMessage.objects.get(role="assistant").truncated is True
 
 
+# --- path 0: retrieval failure (Ollama unreachable while embedding) ----
+#
+# retrieve() used to run in the synchronous part of the view, outside any
+# try, so an unreachable Ollama surfaced as a raw 500 Django debug page
+# (reproduced live) instead of a well-formed NDJSON stream. It now runs
+# inside generate(), after `meta` is already on the wire.
+
+
+def _unreachable(*args, **kwargs):
+    raise OllamaUnavailable("connection refused")
+
+
+def test_retrieval_failure_returns_200_with_well_formed_frames(wired, monkeypatch):
+    import chat.views as views
+
+    monkeypatch.setattr(views, "retrieve", _unreachable)
+    response = _ask("metformin dose")
+    assert response.status_code == 200
+    frames = read_frames(response)  # must not raise: no exception escapes
+    assert frames[0]["type"] == "meta"
+    assert frames[-1]["type"] == "done"
+
+
+def test_retrieval_failure_emits_an_ollama_unavailable_error_frame(wired, monkeypatch):
+    import chat.views as views
+
+    monkeypatch.setattr(views, "retrieve", _unreachable)
+    frames = read_frames(_ask("metformin dose"))
+    error = next(f for f in frames if f["type"] == "error")
+    assert error["code"] == "ollama_unavailable"
+    assert frames[-1]["was_declined"] is False
+    assert frames[-1]["truncated"] is True
+
+
+def test_retrieval_failure_reports_model_missing_when_the_message_says_so(wired, monkeypatch):
+    import chat.views as views
+
+    def not_found(*args, **kwargs):
+        raise OllamaUnavailable("model 'nomic-embed-text' not found, try pulling it first")
+
+    monkeypatch.setattr(views, "retrieve", not_found)
+    error = next(f for f in read_frames(_ask("metformin dose")) if f["type"] == "error")
+    assert error["code"] == "model_missing"
+
+
+def test_retrieval_failure_persists_a_truncated_assistant_message_exactly_once(wired, monkeypatch):
+    import chat.views as views
+
+    monkeypatch.setattr(views, "retrieve", _unreachable)
+    read_frames(_ask("metformin dose"))
+    assert ChatMessage.objects.filter(role="assistant").count() == 1
+    assistant = ChatMessage.objects.get(role="assistant")
+    assert assistant.truncated is True
+    assert assistant.was_declined is False
+
+
+def test_retrieval_failure_still_leaves_a_coherent_session_history(wired, monkeypatch):
+    """The user turn is committed before generate() runs; a retrieval failure
+    must not leave it orphaned with no matching assistant turn, since
+    `session_messages` replays history in `created_at` order forever."""
+    import chat.views as views
+
+    monkeypatch.setattr(views, "retrieve", _unreachable)
+    read_frames(_ask("metformin dose"))
+    roles = list(ChatMessage.objects.values_list("role", flat=True))
+    assert roles == ["user", "assistant"]
+
+
 # --- sessions -----------------------------------------------------------
 
 def test_new_session_is_created_and_returned_in_meta(seeded):
