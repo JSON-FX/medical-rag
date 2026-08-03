@@ -1,0 +1,97 @@
+# Labelled eval question set. See spec 3.
+#
+# answerable         -> a fact present in the included corpus text
+# near_miss          -> a (drug, axis) pair the manifest lists as verified_absent
+# off_corpus_medical -> a real medical question about a drug NOT in the corpus
+# off_domain         -> not medical at all
+#
+# Near-miss pairs are validated against fixtures/manifest.json by
+# tests/integration/test_eval_questions.py. Do not add one without checking.
+
+# ---------- answerable (14) ----------
+- {id: a01, bucket: answerable, expected: answer, drug: metformin,
+   question: "What is the adult starting dose of metformin?"}
+- {id: a02, bucket: answerable, expected: answer, drug: metformin,
+   question: "What is the maximum daily dose of metformin?"}
+- {id: a03, bucket: answerable, expected: answer, drug: metformin,
+   question: "In which patients is metformin contraindicated?"}
+- {id: a04, bucket: answerable, expected: answer, drug: metformin,
+   question: "At what eGFR is metformin contraindicated?"}
+- {id: a05, bucket: answerable, expected: answer, drug: metformin,
+   question: "How often should the metformin dose be increased?"}
+- {id: a06, bucket: answerable, expected: answer, drug: atenolol,
+   question: "What is the initial dose of atenolol for hypertension?"}
+- {id: a07, bucket: answerable, expected: answer, drug: atenolol,
+   question: "What is the maximum useful daily dose of atenolol for hypertension?"}
+- {id: a08, bucket: answerable, expected: answer, drug: atenolol,
+   question: "When is atenolol contraindicated?"}
+- {id: a09, bucket: answerable, expected: answer, drug: atenolol,
+   question: "What is atenolol indicated for?"}
+- {id: a10, bucket: answerable, expected: answer, drug: amoxicillin,
+   question: "What is the adult daily dose range of amoxicillin?"}
+- {id: a11, bucket: answerable, expected: answer, drug: amoxicillin,
+   question: "What is the amoxicillin triple therapy regimen for H. pylori?"}
+- {id: a12, bucket: answerable, expected: answer, drug: amoxicillin,
+   question: "Who should not receive amoxicillin?"}
+- {id: a13, bucket: answerable, expected: answer, drug: amoxicillin,
+   question: "How often is amoxicillin given in divided doses?"}
+- {id: a14, bucket: answerable, expected: answer, drug: metformin,
+   question: "What drug interactions are described for metformin?"}
+
+# ---------- near_miss (9) — every pair verified absent by STEM scan ----------
+- {id: n01, bucket: near_miss, expected: decline, drug: metformin, axis: overdose,
+   question: "What should be done in the event of a metformin overdose?"}
+- {id: n02, bucket: near_miss, expected: decline, drug: atenolol, axis: overdose,
+   question: "How is an atenolol overdose managed?"}
+- {id: n03, bucket: near_miss, expected: decline, drug: metformin, axis: geriatric,
+   question: "How should metformin be dosed in elderly patients?"}
+- {id: n04, bucket: near_miss, expected: decline, drug: amoxicillin, axis: geriatric,
+   question: "Does amoxicillin need a dose adjustment in elderly patients?"}
+- {id: n05, bucket: near_miss, expected: decline, drug: atenolol, axis: pediatric,
+   question: "What is the pediatric dose of atenolol?"}
+- {id: n06, bucket: near_miss, expected: decline, drug: atenolol, axis: pregnancy,
+   question: "Can atenolol be taken while breastfeeding?"}
+- {id: n07, bucket: near_miss, expected: decline, drug: metformin, axis: carcinogen,
+   question: "Is metformin associated with an increased cancer risk?"}
+- {id: n08, bucket: near_miss, expected: decline, drug: atenolol, axis: driving,
+   question: "Is it safe to drive while taking atenolol?"}
+- {id: n09, bucket: near_miss, expected: decline, drug: amoxicillin, axis: immunization,
+   question: "Does amoxicillin reduce the effectiveness of vaccines?"}
+
+# ---------- off_corpus_medical (9) — real drugs, none in the corpus ----------
+- {id: o01, bucket: off_corpus_medical, expected: decline,
+   question: "What are the contraindications for warfarin?"}
+- {id: o02, bucket: off_corpus_medical, expected: decline,
+   question: "What is the starting dose of lisinopril for hypertension?"}
+- {id: o03, bucket: off_corpus_medical, expected: decline,
+   question: "How is insulin glargine titrated?"}
+- {id: o04, bucket: off_corpus_medical, expected: decline,
+   question: "What is the maximum daily dose of ibuprofen?"}
+- {id: o05, bucket: off_corpus_medical, expected: decline,
+   question: "What are the side effects of atorvastatin?"}
+- {id: o06, bucket: off_corpus_medical, expected: decline,
+   question: "When should azithromycin be used instead of penicillin?"}
+- {id: o07, bucket: off_corpus_medical, expected: decline,
+   question: "What is the reversal agent for heparin?"}
+- {id: o08, bucket: off_corpus_medical, expected: decline,
+   question: "How should levothyroxine be monitored?"}
+- {id: o09, bucket: off_corpus_medical, expected: decline,
+   question: "What is the recommended dose of prednisone for an asthma exacerbation?"}
+
+# ---------- off_domain (8) ----------
+- {id: d01, bucket: off_domain, expected: decline,
+   question: "What is the capital of France?"}
+- {id: d02, bucket: off_domain, expected: decline,
+   question: "How do I bake sourdough bread?"}
+- {id: d03, bucket: off_domain, expected: decline,
+   question: "Who won the 1998 World Cup?"}
+- {id: d04, bucket: off_domain, expected: decline,
+   question: "Write me a Python function that reverses a string."}
+- {id: d05, bucket: off_domain, expected: decline,
+   question: "What is the weather forecast for tomorrow?"}
+- {id: d06, bucket: off_domain, expected: decline,
+   question: "Explain how a diesel engine works."}
+- {id: d07, bucket: off_domain, expected: decline,
+   question: "What are the best restaurants in Lisbon?"}
+- {id: d08, bucket: off_domain, expected: decline,
+   question: "How much should I invest in index funds?"}
