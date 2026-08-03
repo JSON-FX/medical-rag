@@ -6,7 +6,7 @@
 
 **Architecture:** A framework-free `rag/` library holds all retrieval and grounding logic (chunking, hybrid search, fusion, the confidence gate, sentinel detection) with zero Django imports, so it tests without a database or network. Two thin Django apps orchestrate it: `documents` (ingestion) and `chat` (query). Chunk text and a SQLite FTS5 lexical index live in SQLite; Chroma holds only vectors. Grounding is two-stage — a multi-signal gate runs *before* the LLM, and a server-detected refusal sentinel catches near-miss questions the gate lets through.
 
-**Tech Stack:** Python 3.12 (via `uv`), Django 5.x, `uvicorn` (ASGI), Chroma (`PersistentClient`), SQLite + FTS5, `pypdf`, Ollama (`llama3.1:8b`, `nomic-embed-text`), `pytest` + `pytest-django`.
+**Tech Stack:** Python 3.12 (via `uv`), Django 5.x (WSGI — see Global Constraints), Chroma (`PersistentClient`), SQLite + FTS5, `pypdf`, Ollama (`llama3.1:8b`, `nomic-embed-text`), `pytest` + `pytest-django`.
 
 **Spec:** [`docs/superpowers/specs/2026-08-02-medical-rag-design.md`](../specs/2026-08-02-medical-rag-design.md). Section references below (§N) point there.
 
@@ -87,7 +87,7 @@ Every task's requirements implicitly include this section.
 cd backend
 uv python install 3.12
 uv init --python 3.12 --no-workspace .
-uv add "django>=5.0,<6.0" "chromadb>=0.5.0" pypdf httpx "django-cors-headers" uvicorn
+uv add "django>=5.0,<6.0" "chromadb>=0.5.0" pypdf httpx "django-cors-headers"
 uv add --dev pytest pytest-django
 echo "3.12" > .python-version
 uv run django-admin startproject medical_rag .
@@ -1928,7 +1928,7 @@ _store_lock = threading.Lock()
 def get_store() -> ChromaStore:
     """Process-wide Chroma handle.
 
-    Double-checked locking because sync views run in uvicorn's threadpool:
+    Double-checked locking because concurrent first requests can race:
     concurrent first requests would otherwise race chromadb's tenant
     initialisation, which fails loudly and non-deterministically.
     """
