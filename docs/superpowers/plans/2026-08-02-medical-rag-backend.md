@@ -3470,7 +3470,13 @@ def retrieve(question: str, embedder, store, cfg: RagConfig) -> RetrievalResult:
     signals = GateSignals(
         top_similarity=top_similarity,
         mean_similarity=mean_similarity,
-        lexical_support=bool(top_ids) and top_ids[0] in set(lexical_ids),
+        # "Does the question's terminology appear in the text we are about to
+        # show the model?" — measured across all delivered chunks, not just the
+        # top one. Using top_ids[0] alone made this hinge on RRF tie-breaking:
+        # when the legs disagree completely, both rank-1 items score 1/(k+1) and
+        # the winner is decided by lexicographic chunk_id sort, so the same
+        # disagreement produced either answer depending on document numbering.
+        lexical_support=bool(set(top_ids) & set(lexical_ids)),
         corpus_empty=False,
     )
     decision = evaluate_gate(signals, cfg.gate)
