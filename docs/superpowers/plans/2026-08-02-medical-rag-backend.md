@@ -29,7 +29,7 @@ Every task's requirements implicitly include this section.
 - **Resolved dependency versions** (installed in Task 1): Python 3.12.13, Django 5.2.16, chromadb 1.5.9.
 - **Chroma collection names must be ≥3 characters** — chromadb 1.5.9 raises `InvalidArgumentError` otherwise.
 - **`bm25()` returns negative values** where more-negative is a better match (verified). Never compare it to a similarity; use rank position only.
-- **All views are synchronous `def`.** Django runs them in a threadpool under ASGI; ORM usage is unchanged.
+- **All views are synchronous `def`, served under WSGI.** Measured: `StreamingHttpResponse` cannot async-iterate a sync generator, so under ASGI Django drains the whole generator in a threadpool before sending a byte (every token at 9.5s, spread 0.00s) versus progressive delivery from 0.7s under WSGI. WSGI also calls `close()` on client disconnect, which is what makes the `finally`-block persistence reliable — ASGI never delivers `GeneratorExit` to a sync generator.
 - **`ATOMIC_REQUESTS` stays off.** Transactions are explicit and narrow, or a stream holds one open for its full duration.
 - **Upload cap 15 MB**, checked before parsing.
 - **Decline copy is server-generated**, never model-generated, and lives in `rag/prompts.py` as `DECLINE_COPY` (§6.8).
@@ -529,7 +529,7 @@ Expected: PASS — 4 tests
 - [ ] **Step 6: Verify against real Ollama**
 
 ```bash
-uv run uvicorn medical_rag.asgi:application --port 8000 &
+uv run python manage.py runserver 8000 --noreload &
 curl -s localhost:8000/api/health/ | python3 -m json.tool
 ```
 
@@ -3982,7 +3982,7 @@ make_pdf(pathlib.Path('/tmp/sample.pdf'), [
   'Metformin: the adult starting dose is 500mg taken twice daily with meals.',
   'Atenolol: 50mg once daily for hypertension in adults.',
 ])"
-uv run uvicorn medical_rag.asgi:application --port 8000 &
+uv run python manage.py runserver 8000 --noreload &
 curl -s -F "file=@/tmp/sample.pdf" localhost:8000/api/documents/ | python3 -m json.tool
 curl -N -s localhost:8000/api/chat/ -H 'Content-Type: application/json' \
      -d '{"question":"what is the adult dose?","session_id":null}'
