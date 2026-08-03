@@ -3156,6 +3156,7 @@ from .ollama import OllamaUnavailable
 from .prompts import SENTINEL
 
 BUFFER_CHARS = 40
+PREAMBLE_TOLERANCE = 24
 
 
 def _http_stream(url: str, payload: dict) -> Iterator[dict]:
@@ -3167,6 +3168,8 @@ def _http_stream(url: str, payload: dict) -> Iterator[dict]:
                     yield json.loads(line)
     except httpx.HTTPError as exc:
         raise OllamaUnavailable(f"chat request failed: {exc}") from exc
+    except ValueError as exc:  # json.JSONDecodeError subclasses ValueError
+        raise OllamaUnavailable(f"chat stream returned invalid JSON: {exc}") from exc
 
 
 def stream_chat(
@@ -3182,6 +3185,22 @@ def stream_chat(
             yield content
 
 
+def _is_sentinel(buffer: str, sentinel: str = SENTINEL) -> bool:
+    """True when the buffered head is a refusal rather than an answer.
+
+    Tolerates a short conversational preamble. The prompt forbids one, but an
+    8B instruct model may still emit "Sure! INSUFFICIENT_CONTEXT", and a missed
+    refusal is doubly bad: the model answers when it should have declined, and
+    the raw sentinel token leaks into the user's visible stream. A real answer
+    that happens to contain the sentinel this early is not a plausible output.
+    """
+    stripped = buffer.lstrip()
+    if stripped.startswith(sentinel):
+        return True
+    position = stripped.find(sentinel)
+    return 0 <= position <= PREAMBLE_TOLERANCE
+
+
 def filter_sentinel(
     deltas: Iterable[str],
     sentinel: str = SENTINEL,
@@ -3192,7 +3211,10 @@ def filter_sentinel(
     The sentinel commonly arrives split across deltas, so the decision waits
     until the buffer holds enough characters to be conclusive.
     """
-    threshold = max(len(sentinel), buffer_chars)
+    # The buffer must hold a tolerated preamble AND the full sentinel, or the
+    # decision fires before the sentinel has finished arriving, locks in a false
+    # negative, and leaks the raw token to the user.
+    threshold = max(buffer_chars, PREAMBLE_TOLERANCE + len(sentinel))
     buffer = ""
     decided = False
 
@@ -3203,14 +3225,14 @@ def filter_sentinel(
         buffer += delta
         if len(buffer) >= threshold:
             decided = True
-            if buffer.lstrip().startswith(sentinel):
+            if _is_sentinel(buffer, sentinel):
                 yield ("declined", None)
                 return
             yield ("token", buffer)
             buffer = ""
 
     if not decided and buffer:
-        if buffer.lstrip().startswith(sentinel):
+        if _is_sentinel(buffer, sentinel):
             yield ("declined", None)
         else:
             yield ("token", buffer)
