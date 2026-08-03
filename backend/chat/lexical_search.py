@@ -21,6 +21,8 @@ SQL = """
 
 
 def search(question: str, limit: int) -> list[str]:
+    if not isinstance(limit, int) or limit <= 0:
+        return []
     expression = build_fts_query(question)
     if not expression:
         return []

@@ -38,3 +38,19 @@ def test_question_with_no_usable_terms_returns_empty(seeded):
 
 def test_search_on_empty_corpus_returns_empty():
     assert search("metformin", limit=5) == []
+
+
+def test_search_distinguishes_decimal_from_whole_dosage(seeded):
+    """Regression: the tokenizer once made these two questions identical."""
+    doc = Document.objects.create(title="Peds", status="ready")
+    Chunk.objects.create(document=doc, chunk_index=0, page_number=1,
+                         text="Pediatric dose is 0.5mg per kg daily.")
+    hits = search("what is the 0.5mg dose", limit=5)
+    assert f"{doc.id}_0" in hits
+
+
+def test_non_positive_or_non_int_limit_returns_empty(seeded):
+    """limit=-1 previously returned the entire corpus; a non-int 500'd."""
+    assert search("metformin", limit=0) == []
+    assert search("metformin", limit=-1) == []
+    assert search("metformin", limit=None) == []

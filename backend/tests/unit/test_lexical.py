@@ -54,3 +54,28 @@ def test_unicode_terms_are_preserved():
 
 def test_numbers_are_kept_because_dosages_matter():
     assert '"500mg"' in build_fts_query("is it 500mg")
+
+
+def test_decimal_dosages_are_not_conflated():
+    """0.5mg and 5mg must not produce the same query — in a dosing context that
+    is the difference between a pediatric and an adult dose."""
+    assert build_fts_query("0.5mg") != build_fts_query("5mg")
+    assert '"0.5mg"' in build_fts_query("is the dose 0.5mg")
+    assert '"2.5mg"' in build_fts_query("2.5mg twice daily")
+
+
+def test_whole_number_dosages_still_tokenise():
+    assert '"500mg"' in build_fts_query("is it 500mg")
+    assert '"50"' in build_fts_query("atenolol 50 mg")
+
+
+def test_stopwords_are_dropped():
+    """Function words make every question match every chunk once OR-joined."""
+    result = build_fts_query("what is the dose of metformin for an adult")
+    for word in ("what", "is", "the", "of", "for", "an"):
+        assert f'"{word}"' not in result, f"stopword {word!r} survived"
+    assert '"dose"' in result and '"metformin"' in result and '"adult"' in result
+
+
+def test_a_question_of_only_stopwords_yields_empty():
+    assert build_fts_query("what is the of for an") == ""
