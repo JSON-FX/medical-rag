@@ -109,3 +109,29 @@ def test_delete_document_returns_number_removed(store):
 
 def test_delete_document_for_unknown_id_returns_zero(store):
     assert store.delete_document(999) == 0
+
+
+def test_delete_ids_removes_only_named_vectors_not_the_whole_document(store):
+    """The reconcile path depends on this: deleting a document's orphan must
+    not take its valid vectors with it."""
+    store.upsert(
+        ids=["3_0", "3_1", "3_2"],
+        embeddings=[_vec(1.0), _vec(0.9), _vec(0.8)],
+        metadatas=[{"document_id": 3, "chunk_index": i} for i in range(3)],
+    )
+    store.delete_ids(["3_2"])
+    assert store.all_ids() == {"3_0", "3_1"}
+
+
+def test_delete_ids_tolerates_a_malformed_id(store):
+    """Ids come from data already known to be inconsistent; parsing them would
+    crash the repair path."""
+    store.upsert(["4_0"], [_vec(1.0)], [{"document_id": 4, "chunk_index": 0}])
+    store.delete_ids(["not-an-int_0"])
+    assert store.all_ids() == {"4_0"}
+
+
+def test_delete_ids_with_empty_list_is_a_noop(store):
+    store.upsert(["5_0"], [_vec(1.0)], [{"document_id": 5, "chunk_index": 0}])
+    assert store.delete_ids([]) == 0
+    assert store.count() == 1

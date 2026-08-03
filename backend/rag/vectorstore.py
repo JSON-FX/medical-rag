@@ -79,6 +79,23 @@ class ChromaStore:
         result = self._collection.delete(where={"document_id": document_id})
         return (result or {}).get("deleted", 0)
 
+    def delete_ids(self, ids: list[str]) -> int:
+        """Delete exactly these vector ids.
+
+        reconcile_vectors needs this rather than delete_document: an orphaned
+        vector usually sits alongside valid ones for the same document, and
+        deleting by document_id would take the valid ones with it — turning a
+        harmless orphan into an unsearchable `ready` document.
+
+        The returned count is Chroma's and can overcount (deleting an id that
+        does not exist still reports 1), so callers that need an accurate
+        figure should verify against all_ids().
+        """
+        if not ids:
+            return 0
+        result = self._collection.delete(ids=ids)
+        return (result or {}).get("deleted", 0)
+
     def all_ids(self) -> set[str]:
         """Used by reconcile_vectors (Task 9)."""
         return set(self._collection.get(include=[])["ids"])

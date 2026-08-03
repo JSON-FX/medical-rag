@@ -20,7 +20,10 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         store = services.get_store()
         vector_ids = store.all_ids()
-        chunks = {c.vector_id: c for c in Chunk.objects.select_related("document")}
+        chunks = {
+            c.vector_id: c
+            for c in Chunk.objects.only("id", "document_id", "chunk_index")
+        }
 
         missing_vectors = set(chunks) - vector_ids     # chunk row, no vector
         orphan_vectors = vector_ids - set(chunks)      # vector, no chunk row
@@ -36,14 +39,29 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("Run with --fix to repair."))
             return
 
-        for vector_id in orphan_vectors:
-            document_id = int(vector_id.split("_")[0])
-            store.delete_document(document_id)
+        # Delete exactly the orphaned ids — never a whole document. Deleting by
+        # document_id would take that document's valid vectors with it, turning
+        # a harmless orphan into an unsearchable `ready` document: strictly
+        # worse than the drift being repaired.
+        if orphan_vectors:
+            store.delete_ids(sorted(orphan_vectors))
+            still_present = store.all_ids() & orphan_vectors
+            self.stdout.write(
+                f"removed {len(orphan_vectors) - len(still_present)} orphan vector(s)"
+            )
+            if still_present:
+                self.stdout.write(
+                    self.style.WARNING(f"{len(still_present)} orphan(s) could not be removed")
+                )
 
+        # Runs independently of the orphan cleanup above. A document that reads
+        # `ready` while being unsearchable is the more damaging drift, and must
+        # not be left unmarked because orphan removal had a problem.
         affected = {chunks[v].document_id for v in missing_vectors}
         if affected:
             Document.objects.filter(id__in=affected).update(
                 status="failed", error_message=REUPLOAD_MESSAGE
             )
+            self.stdout.write(f"marked {len(affected)} document(s) failed")
 
         self.stdout.write(self.style.SUCCESS("Repair complete."))

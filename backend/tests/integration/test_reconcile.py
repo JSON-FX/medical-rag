@@ -59,3 +59,43 @@ def test_fix_marks_documents_with_missing_vectors_as_failed(store):
     doc.refresh_from_db()
     assert doc.status == "failed"
     assert "re-upload" in doc.error_message.lower()
+
+
+def test_fix_preserves_valid_vectors_when_removing_an_orphan(store):
+    """The repair must never be more destructive than the drift it repairs."""
+    doc = Document.objects.create(title="d", status="ready")
+    kept = [
+        Chunk.objects.create(document=doc, chunk_index=i, page_number=1, text=f"chunk {i}")
+        for i in range(2)
+    ]
+    store.upsert(
+        ids=[c.vector_id for c in kept] + [f"{doc.id}_99"],
+        embeddings=[[0.5] * 768] * 3,
+        metadatas=[{"document_id": doc.id, "chunk_index": i} for i in (0, 1, 99)],
+    )
+
+    _run("--fix")
+
+    assert store.all_ids() == {c.vector_id for c in kept}, "valid vectors destroyed"
+    doc.refresh_from_db()
+    assert doc.status == "ready", "a repaired document was wrongly marked failed"
+
+
+def test_fix_survives_a_malformed_vector_id_and_still_marks_documents(store):
+    """One bad row must not defeat the safety net for unrelated documents."""
+    broken = Document.objects.create(title="broken", status="ready")
+    Chunk.objects.create(document=broken, chunk_index=0, page_number=1, text="no vector")
+    store.upsert(["not-an-int_0"], [[0.5] * 768], [{"document_id": 1, "chunk_index": 0}])
+
+    _run("--fix")
+
+    broken.refresh_from_db()
+    assert broken.status == "failed", "missing-vector repair was skipped"
+    assert "not-an-int_0" not in store.all_ids()
+
+
+def test_fix_is_convergent(store):
+    """Running twice must reach a clean state, not crash or oscillate."""
+    store.upsert(["77_0"], [[0.5] * 768], [{"document_id": 77, "chunk_index": 0}])
+    _run("--fix")
+    assert "no drift" in _run().lower()
