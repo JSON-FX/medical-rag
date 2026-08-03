@@ -485,9 +485,21 @@ Every case below has a defined user-visible outcome. None produce a bare 500.
 | Client disconnects mid-stream | `finally` persists accumulated content with `truncated=True` — closes PRD §17's open item |
 | FTS5 syntax error from user input | Cannot occur; input is sanitised (§6.2) and unit-tested |
 
-### 11.1 ASGI
+### 11.1 WSGI, not ASGI — corrected by measurement
 
-Run under **`uvicorn`** rather than the WSGI dev server. Generator teardown on client disconnect is well-defined there, which is what makes the `finally`-block persistence reliable. Views stay **synchronous** — Django runs them in a threadpool under ASGI, so ORM usage is completely unchanged.
+Run under **WSGI**. This reverses the original draft of this section, which specified `uvicorn`/ASGI for "well-defined generator teardown on disconnect". Measured against real `llama3.1:8b` during implementation:
+
+| | ASGI (uvicorn) | WSGI |
+|---|---|---|
+| `meta` frame | 9.48s | **0.01s** |
+| first token | 9.48s | **0.72s** |
+| token spread | **0.00s** | **2.89s** |
+
+`StreamingHttpResponse` cannot async-iterate a **sync** generator, so under ASGI Django falls back to draining the entire generator in a threadpool before sending a byte — the response is fully buffered and nothing streams. Frame *order* survives that buffering, which is why an end-to-end check that verified ordering rather than timing passed against a broken stream.
+
+The teardown rationale was also backwards: ASGI never delivers `GeneratorExit` to a sync generator, precisely because it drains rather than pauses it. WSGI calls `close()` on client disconnect, so the `finally`-block persistence only works there. ASGI provided neither property it was chosen for.
+
+Views stay **synchronous**, so ORM usage is unchanged. The async alternative — an async generator with an async Ollama client and async ORM — is real but disproportionate for a single-user local app.
 
 `ATOMIC_REQUESTS` stays off (Django's default). A request-wrapping transaction would remain open for the full duration of a stream. Transactions are explicit and narrow.
 

@@ -1,0 +1,217 @@
+import pytest
+
+from chat.retrieval import retrieve
+from documents.models import Chunk, Document
+from rag.config import load_config
+
+pytestmark = pytest.mark.django_db
+
+CFG = load_config(env={})
+
+
+@pytest.fixture
+def seeded(chroma_store, fake_embedder):
+    doc = Document.objects.create(title="Monograph", status="ready")
+    chunks = [
+        Chunk.objects.create(document=doc, chunk_index=0, page_number=1,
+                             text="Metformin adult starting dose is 500mg twice daily."),
+        Chunk.objects.create(document=doc, chunk_index=1, page_number=2,
+                             text="Atenolol is a beta blocker for hypertension."),
+    ]
+    chroma_store.upsert(
+        ids=[c.vector_id for c in chunks],
+        embeddings=fake_embedder.embed_documents([c.text for c in chunks]),
+        metadatas=[{"document_id": doc.id, "chunk_index": c.chunk_index} for c in chunks],
+    )
+    return doc
+
+
+def test_empty_corpus_short_circuits_before_retrieval(chroma_store, fake_embedder):
+    result = retrieve("anything", fake_embedder, chroma_store, CFG)
+    assert result.decision.proceed is False
+    assert result.decision.reason == "empty_corpus"
+    assert result.chunks == []
+
+
+def test_on_topic_question_proceeds_with_hydrated_chunks(seeded, chroma_store, fake_embedder):
+    result = retrieve("metformin dose", fake_embedder, chroma_store, CFG)
+    assert result.decision.proceed is True
+    assert result.chunks
+    assert "Metformin" in result.chunks[0].text
+    assert result.chunks[0].title == "Monograph"
+    assert result.chunks[0].page_number == 1
+
+
+def test_off_domain_question_declines(seeded, chroma_store, fake_embedder):
+    result = retrieve("what is the capital of france", fake_embedder, chroma_store, CFG)
+    assert result.decision.proceed is False
+    assert result.decision.reason == "off_domain"
+
+
+def test_gate_signals_are_populated_for_observability(seeded, chroma_store, fake_embedder):
+    result = retrieve("metformin dose", fake_embedder, chroma_store, CFG)
+    assert set(result.decision.signals) == {
+        "top_similarity", "mean_similarity", "lexical_support", "corpus_empty"
+    }
+
+
+def test_chunks_are_limited_to_top_k(seeded, chroma_store, fake_embedder):
+    result = retrieve("metformin", fake_embedder, chroma_store, CFG)
+    assert len(result.chunks) <= CFG.retrieval.top_k
+
+
+def test_mean_similarity_is_averaged_over_the_delivered_top_k_not_the_full_pool(
+    chroma_store, fake_embedder
+):
+    """Regression for the wrong-population bug: mean_similarity used to
+    average all per_leg=10 vector hits regardless of what made the cut. With
+    4 on-topic chunks and 6 unrelated filler chunks in a 10-candidate pool,
+    the old population would average in the 6 unrelated zeros (mean 0.4);
+    the corrected population is only the top_k=4 chunks actually delivered
+    to the model — mean 1.0, since FakeEmbedder gives every on-topic chunk
+    an identical, maximally similar vector.
+    """
+    doc = Document.objects.create(title="Mono", status="ready")
+    on_topic = [
+        Chunk.objects.create(
+            document=doc, chunk_index=i, page_number=1,
+            text=f"Metformin dosing guidance, section {i}.",
+        )
+        for i in range(4)
+    ]
+    filler = [
+        Chunk.objects.create(
+            document=doc, chunk_index=100 + i, page_number=1,
+            text=f"General wellness advice number {i}: drink water and rest.",
+        )
+        for i in range(6)
+    ]
+    all_chunks = on_topic + filler
+    chroma_store.upsert(
+        ids=[c.vector_id for c in all_chunks],
+        embeddings=fake_embedder.embed_documents([c.text for c in all_chunks]),
+        metadatas=[{"document_id": doc.id, "chunk_index": c.chunk_index} for c in all_chunks],
+    )
+
+    result = retrieve("metformin dosing", fake_embedder, chroma_store, CFG)
+
+    assert {c.chunk_id for c in result.chunks} == {c.vector_id for c in on_topic}
+    assert result.decision.signals["mean_similarity"] == pytest.approx(1.0)
+
+
+def test_vector_ids_with_no_sqlite_row_are_dropped_not_crashed(
+    seeded, chroma_store, fake_embedder
+):
+    """An orphaned vector must not break a query (spec 10)."""
+    chroma_store.upsert(
+        ["999_0"],
+        fake_embedder.embed_documents(["metformin"]),
+        [{"document_id": 999, "chunk_index": 0}],
+    )
+    result = retrieve("metformin dose", fake_embedder, chroma_store, CFG)
+    assert all(c.chunk_id != "999_0" for c in result.chunks)
+
+
+def test_lexical_support_does_not_depend_on_document_id_ordering(chroma_store, fake_embedder):
+    """Regression: when the legs disagree, RRF ties and the winner was decided
+    by chunk_id string sort, so this signal flipped with document numbering."""
+    from rag.gate import GateSignals
+
+    # Two documents whose ids sort in opposite directions relative to each other.
+    low = Document.objects.create(title="Low", status="ready")
+    high = Document.objects.create(title="High", status="ready")
+    for doc, text in ((low, "metformin dosing guidance"), (high, "atenolol dosing guidance")):
+        chunk = Chunk.objects.create(document=doc, chunk_index=0, page_number=1, text=text)
+        chroma_store.upsert(
+            [chunk.vector_id],
+            fake_embedder.embed_documents([text]),
+            [{"document_id": doc.id, "chunk_index": 0}],
+        )
+
+    result = retrieve("metformin dosing", fake_embedder, chroma_store, CFG)
+    assert result.decision.signals["lexical_support"] is True, (
+        "a chunk found by the lexical leg was delivered, so support must be True"
+    )
+
+
+def test_lexical_support_is_false_when_no_delivered_chunk_was_found_lexically(
+    chroma_store, fake_embedder
+):
+    """A question whose terminology appears nowhere in the delivered text."""
+    doc = Document.objects.create(title="Mono", status="ready")
+    chunk = Chunk.objects.create(
+        document=doc, chunk_index=0, page_number=1, text="Atenolol is a beta blocker."
+    )
+    chroma_store.upsert(
+        [chunk.vector_id],
+        fake_embedder.embed_documents([chunk.text]),
+        [{"document_id": doc.id, "chunk_index": 0}],
+    )
+    result = retrieve("zzzquux nonexistent terminology", fake_embedder, chroma_store, CFG)
+    assert result.decision.signals["lexical_support"] is False
+
+
+def _seed_two_docs(store, embedder):
+    """Two single-chunk documents, so the legs can be forced to disagree."""
+    chunks = []
+    for title, text in (("A", "metformin dosing guidance"), ("B", "atenolol dosing guidance")):
+        doc = Document.objects.create(title=title, status="ready")
+        chunk = Chunk.objects.create(document=doc, chunk_index=0, page_number=1, text=text)
+        store.upsert(
+            [chunk.vector_id],
+            embedder.embed_documents([text]),
+            [{"document_id": doc.id, "chunk_index": 0}],
+        )
+        chunks.append(chunk)
+    return chunks
+
+
+def test_lexical_support_is_stable_under_reversed_document_id_ordering(
+    chroma_store, fake_embedder, monkeypatch
+):
+    """The pre-fix bug: with the legs disjoint, RRF ties and the fused winner was
+    decided by lexicographic chunk_id sort, so this signal flipped depending on
+    which document happened to have the lower id — for the very signal the gate
+    uses to adjudicate the near-miss band.
+    """
+    from chat import retrieval as retrieval_mod
+
+    first, second = _seed_two_docs(chroma_store, fake_embedder)
+
+    observed = []
+    for only_match in ([first.vector_id], [second.vector_id]):
+        monkeypatch.setattr(
+            retrieval_mod, "lexical_search", lambda q, limit, _m=only_match: _m
+        )
+        observed.append(
+            retrieve("metformin dosing", fake_embedder, chroma_store, CFG)
+            .decision.signals["lexical_support"]
+        )
+
+    assert len(set(observed)) == 1, f"support flipped with document id order: {observed}"
+    assert observed == [True, True]
+
+
+def test_lexical_support_true_when_any_delivered_chunk_was_found_lexically(
+    chroma_store, fake_embedder, monkeypatch
+):
+    from chat import retrieval as retrieval_mod
+
+    _first, second = _seed_two_docs(chroma_store, fake_embedder)
+    monkeypatch.setattr(
+        retrieval_mod, "lexical_search", lambda q, limit: [second.vector_id]
+    )
+    result = retrieve("metformin dosing", fake_embedder, chroma_store, CFG)
+    assert result.decision.signals["lexical_support"] is True
+
+
+def test_lexical_support_false_when_the_lexical_leg_finds_nothing(
+    chroma_store, fake_embedder, monkeypatch
+):
+    """A question whose terms appear nowhere yields an empty lexical leg."""
+    from chat import retrieval as retrieval_mod
+
+    _seed_two_docs(chroma_store, fake_embedder)
+    monkeypatch.setattr(retrieval_mod, "lexical_search", lambda q, limit: [])
+    result = retrieve("metformin dosing", fake_embedder, chroma_store, CFG)
+    assert result.decision.signals["lexical_support"] is False

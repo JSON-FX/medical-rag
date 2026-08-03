@@ -1,0 +1,120 @@
+import json
+import pytest
+from django.test import Client
+
+from rag.config import load_config
+
+
+class FakeOllama:
+    """Stands in for OllamaClient. Keep the signature identical."""
+
+    def __init__(self, models, reachable=True):
+        self._models = models
+        self._reachable = reachable
+
+    def is_reachable(self):
+        return self._reachable
+
+    def list_models(self):
+        if not self._reachable:
+            raise ConnectionError("unreachable")
+        return self._models
+
+
+@pytest.fixture
+def client():
+    return Client()
+
+
+def test_health_reports_all_present(client, monkeypatch):
+    import chat.views as views
+    monkeypatch.setattr(
+        views, "build_client", lambda cfg: FakeOllama(["llama3.1:8b", "nomic-embed-text:latest"])
+    )
+    resp = client.get("/api/health/")
+    body = json.loads(resp.content)
+    assert resp.status_code == 200
+    assert body["ollama_reachable"] is True
+    assert body["models"]["chat"] is True
+    assert body["models"]["embed"] is True
+
+
+def test_health_matches_model_tags_ignoring_latest_suffix(client, monkeypatch):
+    """`ollama list` reports `nomic-embed-text:latest` for a `nomic-embed-text` pull."""
+    import chat.views as views
+    monkeypatch.setattr(
+        views, "build_client", lambda cfg: FakeOllama(["llama3.1:8b", "nomic-embed-text:latest"])
+    )
+    body = json.loads(client.get("/api/health/").content)
+    assert body["models"]["embed"] is True
+
+
+def test_health_reports_missing_model(client, monkeypatch):
+    import chat.views as views
+    monkeypatch.setattr(views, "build_client", lambda cfg: FakeOllama(["nomic-embed-text:latest"]))
+    body = json.loads(client.get("/api/health/").content)
+    assert body["models"]["chat"] is False
+    assert body["models"]["embed"] is True
+
+
+def test_health_reports_unreachable_without_raising(client, monkeypatch):
+    import chat.views as views
+    monkeypatch.setattr(views, "build_client", lambda cfg: FakeOllama([], reachable=False))
+    resp = client.get("/api/health/")
+    body = json.loads(resp.content)
+    assert resp.status_code == 200          # health must not 500 when Ollama is down
+    assert body["ollama_reachable"] is False
+    assert body["models"]["chat"] is False
+
+
+def test_health_returns_200_when_ollama_returns_a_non_json_body(client, monkeypatch):
+    """Exercises the REAL OllamaClient end to end (build_client is not
+    replaced here): a 200 with an HTML body must not become an uncaught
+    JSONDecodeError inside the view. Regression for rag/ollama.py."""
+    import httpx
+
+    def fake_get(url, *a, **k):
+        return httpx.Response(
+            200, text="<html>bad gateway</html>", request=httpx.Request("GET", url)
+        )
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    resp = client.get("/api/health/")
+    body = json.loads(resp.content)
+    assert resp.status_code == 200
+    assert body["ollama_reachable"] is False
+
+
+def test_health_returns_200_when_ollama_returns_a_malformed_payload(client, monkeypatch):
+    """Same as above, for a 200 whose JSON is well-formed but shaped wrong
+    (a renamed `name` key), which raises KeyError rather than ValueError."""
+    import httpx
+
+    def fake_get(url, *a, **k):
+        return httpx.Response(
+            200,
+            json={"models": [{"id": "llama3.1:8b"}]},
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    resp = client.get("/api/health/")
+    body = json.loads(resp.content)
+    assert resp.status_code == 200
+    assert body["ollama_reachable"] is False
+
+
+def test_a_different_tag_of_the_same_model_is_not_a_match(client, monkeypatch):
+    """`llama3.1:70b` must NOT satisfy a requirement for `llama3.1:8b`.
+
+    Reporting it present would send the user into a demo whose chat endpoint
+    404s on a tag health already vouched for.
+    """
+    import chat.views as views
+    monkeypatch.setattr(
+        views,
+        "build_client",
+        lambda cfg: FakeOllama(["llama3.1:70b", "llama3.1:8b-instruct-q4_0"]),
+    )
+    body = json.loads(client.get("/api/health/").content)
+    assert body["models"]["chat"] is False

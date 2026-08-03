@@ -6,7 +6,7 @@
 
 **Architecture:** A framework-free `rag/` library holds all retrieval and grounding logic (chunking, hybrid search, fusion, the confidence gate, sentinel detection) with zero Django imports, so it tests without a database or network. Two thin Django apps orchestrate it: `documents` (ingestion) and `chat` (query). Chunk text and a SQLite FTS5 lexical index live in SQLite; Chroma holds only vectors. Grounding is two-stage — a multi-signal gate runs *before* the LLM, and a server-detected refusal sentinel catches near-miss questions the gate lets through.
 
-**Tech Stack:** Python 3.12 (via `uv`), Django 5.x, `uvicorn` (ASGI), Chroma (`PersistentClient`), SQLite + FTS5, `pypdf`, Ollama (`llama3.1:8b`, `nomic-embed-text`), `pytest` + `pytest-django`.
+**Tech Stack:** Python 3.12 (via `uv`), Django 5.x (WSGI — see Global Constraints), Chroma (`PersistentClient`), SQLite + FTS5, `pypdf`, Ollama (`llama3.1:8b`, `nomic-embed-text`), `pytest` + `pytest-django`.
 
 **Spec:** [`docs/superpowers/specs/2026-08-02-medical-rag-design.md`](../specs/2026-08-02-medical-rag-design.md). Section references below (§N) point there.
 
@@ -26,8 +26,10 @@ Every task's requirements implicitly include this section.
 - **Chroma must be configured for cosine space explicitly.** It defaults to L2. With cosine, `similarity = 1 - distance`.
 - **`rag/` must not import `django`.** Enforced by a test.
 - **SQLite FTS5 is available** (verified: `ENABLE_FTS5`, SQLite 3.51.0). Tokenizer is `porter unicode61`.
+- **Resolved dependency versions** (installed in Task 1): Python 3.12.13, Django 5.2.16, chromadb 1.5.9.
+- **Chroma collection names must be ≥3 characters** — chromadb 1.5.9 raises `InvalidArgumentError` otherwise.
 - **`bm25()` returns negative values** where more-negative is a better match (verified). Never compare it to a similarity; use rank position only.
-- **All views are synchronous `def`.** Django runs them in a threadpool under ASGI; ORM usage is unchanged.
+- **All views are synchronous `def`, served under WSGI.** Measured: `StreamingHttpResponse` cannot async-iterate a sync generator, so under ASGI Django drains the whole generator in a threadpool before sending a byte (every token at 9.5s, spread 0.00s) versus progressive delivery from 0.7s under WSGI. WSGI also calls `close()` on client disconnect, which is what makes the `finally`-block persistence reliable — ASGI never delivers `GeneratorExit` to a sync generator.
 - **`ATOMIC_REQUESTS` stays off.** Transactions are explicit and narrow, or a stream holds one open for its full duration.
 - **Upload cap 15 MB**, checked before parsing.
 - **Decline copy is server-generated**, never model-generated, and lives in `rag/prompts.py` as `DECLINE_COPY` (§6.8).
@@ -72,7 +74,7 @@ Every task's requirements implicitly include this section.
 ## Task 1: Backend scaffold and configuration
 
 **Files:**
-- Create: `backend/pyproject.toml`, `backend/.python-version`, `backend/manage.py`, `backend/medical_rag/{__init__,settings,urls,asgi}.py`, `backend/rag/{__init__,config}.py`, `backend/pytest.ini`, `backend/conftest.py`
+- Create: `backend/pyproject.toml`, `backend/.python-version`, `backend/manage.py`, `backend/medical_rag/{__init__,settings,urls,asgi}.py`, `backend/rag/{__init__,config}.py`, `backend/pytest.ini`, `backend/tests/__init__.py`
 - Test: `backend/tests/unit/test_config.py`, `backend/tests/unit/test_rag_purity.py`
 
 **Interfaces:**
@@ -85,7 +87,7 @@ Every task's requirements implicitly include this section.
 cd backend
 uv python install 3.12
 uv init --python 3.12 --no-workspace .
-uv add "django>=5.0,<6.0" "chromadb>=0.5.0" pypdf httpx "django-cors-headers" uvicorn
+uv add "django>=5.0,<6.0" "chromadb>=0.5.0" pypdf httpx "django-cors-headers"
 uv add --dev pytest pytest-django
 echo "3.12" > .python-version
 uv run django-admin startproject medical_rag .
@@ -356,6 +358,22 @@ def test_health_reports_missing_model(client, monkeypatch):
     assert body["models"]["embed"] is True
 
 
+def test_a_different_tag_of_the_same_model_is_not_a_match(client, monkeypatch):
+    """`llama3.1:70b` must NOT satisfy a requirement for `llama3.1:8b`.
+
+    Reporting it present would send the user into a demo whose chat endpoint
+    404s on a tag health already vouched for.
+    """
+    import chat.views as views
+    monkeypatch.setattr(
+        views,
+        "build_client",
+        lambda cfg: FakeOllama(["llama3.1:70b", "llama3.1:8b-instruct-q4_0"]),
+    )
+    body = json.loads(client.get("/api/health/").content)
+    assert body["models"]["chat"] is False
+
+
 def test_health_reports_unreachable_without_raising(client, monkeypatch):
     import chat.views as views
     monkeypatch.setattr(views, "build_client", lambda cfg: FakeOllama([], reachable=False))
@@ -434,9 +452,20 @@ def build_client(cfg):
 
 
 def _has_model(available: list[str], wanted: str) -> bool:
-    """`ollama list` reports `name:latest` for an untagged pull."""
-    wanted_base = wanted.split(":")[0]
-    return any(name == wanted or name.split(":")[0] == wanted_base for name in available)
+    """`ollama list` reports `name:latest` for an untagged pull.
+
+    Only the `:latest` suffix is normalised. Stripping the tag wholesale would
+    make `llama3.1:70b` satisfy a request for `llama3.1:8b`, so health would
+    report the model present and the failure would resurface later as an
+    unexplained 404 from the chat endpoint — the precise false confidence this
+    endpoint exists to prevent.
+    """
+
+    def normalise(name: str) -> str:
+        return name[: -len(":latest")] if name.endswith(":latest") else name
+
+    target = normalise(wanted)
+    return any(normalise(name) == target for name in available)
 
 
 @require_GET
@@ -500,7 +529,7 @@ Expected: PASS — 4 tests
 - [ ] **Step 6: Verify against real Ollama**
 
 ```bash
-uv run uvicorn medical_rag.asgi:application --port 8000 &
+uv run python manage.py runserver 8000 --noreload &
 curl -s localhost:8000/api/health/ | python3 -m json.tool
 ```
 
@@ -533,6 +562,8 @@ can show an actionable message instead of a mystery failure."
 `backend/tests/unit/test_chunking.py`:
 
 ```python
+import pytest
+
 from rag.chunking import PageText, ChunkDraft, chunk_pages
 from rag.config import ChunkConfig
 
@@ -589,7 +620,29 @@ def test_no_chunk_greatly_exceeds_configured_size():
 def test_empty_document_yields_no_chunks():
     assert chunk_pages([], CFG) == []
     assert chunk_pages([PageText(1, "")], CFG) == []
+
+
+def test_overlap_is_added_on_top_of_size_not_carved_out_of_it():
+    """Documents the size contract: max chunk length is size + overlap.
+
+    Pinned deliberately. If this ever changes, chunk boundaries shift and the
+    Phase 3 threshold sweep is no longer comparable to earlier runs.
+    """
+    page = PageText(1, "x" * 250)
+    chunks = chunk_pages([page], ChunkConfig(size=100, overlap=20))
+    assert max(len(c.text) for c in chunks) == 120
+    assert all(len(c.text) <= 100 + 20 for c in chunks)
+
+
+def test_non_positive_chunk_size_raises_rather_than_dropping_text():
+    """A negative size once made _split_recursive return [] — silently losing
+    the entire page. Losing text is unrecoverable: retrieval can never find it."""
+    for bad in (0, -1):
+        with pytest.raises(ValueError, match="positive"):
+            chunk_pages([PageText(1, "content that must not vanish")], ChunkConfig(size=bad, overlap=0))
 ```
+
+Note `test_no_chunk_greatly_exceeds_configured_size` uses `overlap=0`, which is why it does not conflict with the size+overlap contract above.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -667,6 +720,21 @@ def _apply_overlap(chunks: list[str], overlap: int) -> list[str]:
 
 
 def chunk_pages(pages: list[PageText], cfg: ChunkConfig) -> list[ChunkDraft]:
+    """Split pages into chunks that never span a page boundary.
+
+    Size contract: each chunk holds up to ``cfg.size`` characters of new text,
+    plus up to ``cfg.overlap`` characters repeated from the tail of the previous
+    chunk on the same page. The effective maximum length is therefore
+    ``cfg.size + cfg.overlap``, not ``cfg.size``. At the real configuration
+    (1000/150) that is 1150 characters, roughly 300 tokens — far inside the
+    embedding model's window.
+    """
+    if cfg.size <= 0:
+        # A negative size made range() empty, so _split_recursive returned []
+        # and dropped the page silently. Text that vanishes can never be
+        # retrieved, and no test downstream would notice.
+        raise ValueError(f"chunk size must be positive, got {cfg.size}")
+
     drafts: list[ChunkDraft] = []
     index = 0
     for page in pages:
@@ -816,19 +884,25 @@ DOCUMENT_PREFIX = "search_document: "
 QUERY_PREFIX = "search_query: "
 
 
-def _http_transport(url: str, payload: dict) -> dict:
+def _http_transport(url: str, payload: dict, timeout: float) -> dict:
     try:
-        resp = httpx.post(url, json=payload, timeout=120.0)
+        resp = httpx.post(url, json=payload, timeout=timeout)
         resp.raise_for_status()
+        return resp.json()
     except httpx.HTTPError as exc:
         raise OllamaUnavailable(f"embed request failed: {exc}") from exc
-    return resp.json()
+    except ValueError as exc:  # json.JSONDecodeError subclasses ValueError
+        raise OllamaUnavailable(f"embed response was not valid JSON: {exc}") from exc
 
 
 class OllamaEmbedder:
     def __init__(self, cfg: OllamaConfig, transport: Callable[[str, dict], dict] | None = None):
         self.cfg = cfg
-        self._transport = transport or _http_transport
+        # The lambda keeps the injectable seam at two arguments while still
+        # wiring cfg.request_timeout_s, which was otherwise unreachable.
+        self._transport = transport or (
+            lambda url, payload: _http_transport(url, payload, cfg.request_timeout_s)
+        )
 
     def _embed(self, inputs: list[str]) -> list[list[float]]:
         if not inputs:
@@ -837,6 +911,15 @@ class OllamaEmbedder:
             f"{self.cfg.host}/api/embed", {"model": self.cfg.embed_model, "input": inputs}
         )
         vectors = body.get("embeddings", [])
+        if len(vectors) != len(inputs):
+            # Count mismatches are more dangerous than they look: ingestion passes
+            # ids and embeddings to Chroma positionally, so a short response pairs
+            # chunk text with the wrong vector and silently poisons the store.
+            raise ValueError(
+                f"{self.cfg.embed_model} returned {len(vectors)} embeddings for "
+                f"{len(inputs)} inputs. Refusing to continue: mismatched counts would "
+                f"misalign chunk text with vectors and silently poison the store."
+            )
         for vector in vectors:
             if len(vector) != self.cfg.embed_dimensions:
                 raise ValueError(
@@ -904,10 +987,26 @@ def _vec(seed: float) -> list[float]:
 
 
 def test_collection_uses_cosine_space_not_the_l2_default():
-    """Chroma defaults to L2. The whole gate depends on cosine (spec 6.4)."""
+    """Chroma defaults to L2. The whole gate depends on cosine (spec 6.4).
+
+    Verified empirically on chromadb 1.5.9: with no configuration, two opposite
+    unit vectors sit at distance 4.0 (L2 squared); with cosine they sit at 2.0.
+    """
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
-        assert ChromaStore(path=tmp, collection_name="c").space == "cosine"
+        assert ChromaStore(path=tmp, collection_name="spacecheck").space == "cosine"
+
+
+def test_opposite_vectors_are_distance_two_proving_cosine_not_l2(store):
+    """The behavioural counterpart to the config assertion above: L2 would
+    give 4.0 here, so this fails loudly if the space silently reverts."""
+    store.upsert(
+        ids=["1_0", "1_1"],
+        embeddings=[_vec(1.0), [-1.0] + [0.0] * 7],
+        metadatas=[{"document_id": 1, "chunk_index": 0}, {"document_id": 1, "chunk_index": 1}],
+    )
+    hits = store.query([1.0] + [0.0] * 7, n_results=2)
+    assert hits[1].distance == pytest.approx(2.0, abs=1e-3)
 
 
 def test_upsert_then_query_returns_nearest_first(store):
@@ -995,13 +1094,18 @@ class ChromaStore:
 
     @property
     def space(self) -> str:
-        """Read back the configured space. The key has moved across Chroma
-        releases, so check both known locations before giving up."""
-        meta = self._collection.metadata or {}
-        if "hnsw:space" in meta:
-            return meta["hnsw:space"]
+        """Read back the configured space.
+
+        `configuration_json` is authoritative on chromadb 1.5.9 — verified to
+        report the real space whichever form created the collection — whereas
+        `metadata` is populated only by the metadata form. Fall back to
+        metadata for older releases.
+        """
         config = getattr(self._collection, "configuration_json", None) or {}
-        return (config.get("hnsw") or {}).get("space", "unknown")
+        space = (config.get("hnsw") or {}).get("space")
+        if space:
+            return space
+        return (self._collection.metadata or {}).get("hnsw:space", "unknown")
 
     def upsert(self, ids: list[str], embeddings: list[list[float]], metadatas: list[dict]) -> None:
         if not ids:
@@ -1009,11 +1113,20 @@ class ChromaStore:
         self._collection.upsert(ids=ids, embeddings=embeddings, metadatas=metadatas)
 
     def query(self, embedding: list[float], n_results: int) -> list[VectorHit]:
-        if self.count() == 0:
+        """Nearest neighbours, closest first.
+
+        No count() guard or clamp here deliberately. Verified against chromadb
+        1.5.9: querying an empty collection returns [[]] and an n_results larger
+        than the collection simply returns fewer rows — neither raises. The only
+        input Chroma rejects is n_results <= 0, which is what this guards.
+        Clamping with count() previously added two backend round-trips per query
+        and a TOCTOU window that could drive n_results to zero and crash.
+        """
+        if n_results <= 0:
             return []
         result = self._collection.query(
             query_embeddings=[embedding],
-            n_results=min(n_results, self.count()),
+            n_results=n_results,
             include=["distances"],
         )
         ids = result["ids"][0]
@@ -1021,9 +1134,30 @@ class ChromaStore:
         return [VectorHit(chunk_id=i, distance=float(d)) for i, d in zip(ids, distances)]
 
     def delete_document(self, document_id: int) -> int:
-        before = self.count()
-        self._collection.delete(where={"document_id": document_id})
-        return before - self.count()
+        """Delete every vector for a document, returning how many went.
+
+        Uses Chroma's atomic {"deleted": N} result rather than diffing count()
+        before and after, which is wrong under any interleaved mutation.
+        """
+        result = self._collection.delete(where={"document_id": document_id})
+        return (result or {}).get("deleted", 0)
+
+    def delete_ids(self, ids: list[str]) -> int:
+        """Delete exactly these vector ids.
+
+        reconcile_vectors needs this rather than delete_document: an orphaned
+        vector usually sits alongside valid ones for the same document, and
+        deleting by document_id would take the valid ones with it — turning a
+        harmless orphan into an unsearchable `ready` document.
+
+        The returned count is Chroma's and can overcount (deleting an id that
+        does not exist still reports 1), so callers needing an accurate figure
+        should verify against all_ids().
+        """
+        if not ids:
+            return 0
+        result = self._collection.delete(ids=ids)
+        return (result or {}).get("deleted", 0)
 
     def all_ids(self) -> set[str]:
         """Used by reconcile_vectors (Task 9)."""
@@ -1036,9 +1170,19 @@ class ChromaStore:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/unit/test_vectorstore.py -v`
-Expected: PASS — 7 tests
+Expected: PASS — 8 tests
 
-If `test_collection_uses_cosine_space_not_the_l2_default` fails, the installed Chroma version expects a different configuration key. Check `uv run python -c "import chromadb; print(chromadb.__version__)"` and adjust the `get_or_create_collection` call and the `space` property together. **Do not delete the assertion** — it exists precisely to catch this.
+**Verified against the installed chromadb 1.5.9 before this plan was executed** — you should not need to adjust anything, but if the assertion fails, adjust the `get_or_create_collection` call and the `space` property together and **do not delete the assertion**; it exists precisely to catch a silent revert to L2.
+
+Measured facts for this version:
+
+| Creation form | `configuration_json.hnsw.space` | `metadata` | Opposite-vector distance |
+|---|---|---|---|
+| `metadata={"hnsw:space": "cosine"}` | `cosine` | populated | 2.0 ✅ |
+| `configuration={"hnsw": {"space": "cosine"}}` | `cosine` | empty | 2.0 ✅ |
+| **omitted (default)** | **`l2`** | empty | **4.0** ❌ |
+
+Also note: **chromadb 1.5.9 rejects collection names shorter than 3 characters** with `InvalidArgumentError`. Every collection name in this plan (`medical_documents`, `test_docs`, `test`, `spacecheck`) satisfies that.
 
 - [ ] **Step 5: Commit**
 
@@ -1280,12 +1424,13 @@ table in sync."
 ## Task 7: PDF extraction and ingestion pipeline
 
 **Files:**
-- Create: `backend/documents/ingestion.py`
+- Create: `backend/documents/ingestion.py`, `backend/tests/conftest.py`
 - Test: `backend/tests/integration/test_ingestion.py`, `backend/tests/fixtures/make_fixture_pdf.py`
 
 **Interfaces:**
 - Consumes: `rag.chunking.chunk_pages`, `rag.embeddings.OllamaEmbedder`, `rag.vectorstore.ChromaStore`, `documents.models.Document`, `documents.models.Chunk`
 - Produces: `extract_pages(path) -> list[PageText]`, `ingest_document(document, embedder, store, cfg) -> Document`, `cleanup_document(document_id, store)`
+- Produces (test infrastructure, used by Tasks 8, 15, 16): `tests/conftest.py` exporting `FakeEmbedder`, `ExplodingEmbedder`, and the `fake_embedder` / `chroma_store` fixtures
 
 - [ ] **Step 1: Create a fixture PDF generator**
 
@@ -1340,49 +1485,85 @@ def make_blank_pdf(path: pathlib.Path) -> pathlib.Path:
     return make_pdf(path, [""])
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [ ] **Step 2: Write the shared test fixtures**
+
+`backend/tests/conftest.py` — the single definition of the fake embedder, imported by every later test module. Tasks 8, 15, and 16 use these fixtures rather than redefining stubs.
+
+```python
+"""Shared test fixtures.
+
+One fake embedder serves every test module. Known terms map to fixed
+orthogonal axes so cosine distances are predictable — "france" is maximally
+far from "metformin" — and everything unrecognised lands on the unrelated
+axis. Width matches the real model (768) so tests cannot pass against a
+dimensionality the production path would reject.
+"""
+import pytest
+
+from rag.vectorstore import ChromaStore
+
+DIMENSIONS = 768
+
+
+class FakeEmbedder:
+    AXES = {"metformin": 0, "atenolol": 1}
+    UNRELATED_AXIS = 2
+
+    def __init__(self):
+        self.document_batches = 0      # lets tests assert batching behaviour
+
+    def _vector(self, text: str) -> list[float]:
+        vector = [0.0] * DIMENSIONS
+        lowered = text.lower()
+        for term, axis in self.AXES.items():
+            if term in lowered:
+                vector[axis] = 1.0
+                return vector
+        vector[self.UNRELATED_AXIS] = 1.0
+        return vector
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.document_batches += 1
+        return [self._vector(t) for t in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._vector(text)
+
+
+class ExplodingEmbedder(FakeEmbedder):
+    """Simulates Ollama failing partway through ingestion."""
+
+    def embed_documents(self, texts):
+        raise RuntimeError("ollama exploded")
+
+
+@pytest.fixture
+def fake_embedder():
+    return FakeEmbedder()
+
+
+@pytest.fixture
+def chroma_store(tmp_path):
+    return ChromaStore(path=str(tmp_path / "chroma"), collection_name="test")
+```
+
+- [ ] **Step 3: Write the failing tests**
 
 `backend/tests/integration/test_ingestion.py`:
 
 ```python
-import pathlib
-
 import pytest
 from django.core.files.base import ContentFile
 
 from documents.ingestion import cleanup_document, extract_pages, ingest_document
 from documents.models import Chunk, Document
 from rag.config import load_config
-from rag.vectorstore import ChromaStore
+from tests.conftest import ExplodingEmbedder
 from tests.fixtures.make_fixture_pdf import make_blank_pdf, make_pdf
 
 pytestmark = pytest.mark.django_db
 
 CFG = load_config(env={"CHUNK_SIZE": "120", "CHUNK_OVERLAP": "20"})
-
-
-class FakeEmbedder:
-    """Deterministic 768-dim vectors; no network."""
-
-    def __init__(self):
-        self.calls = 0
-
-    def embed_documents(self, texts):
-        self.calls += 1
-        return [[float(len(t) % 10)] * 768 for t in texts]
-
-    def embed_query(self, text):
-        return [float(len(text) % 10)] * 768
-
-
-class ExplodingEmbedder(FakeEmbedder):
-    def embed_documents(self, texts):
-        raise RuntimeError("ollama exploded")
-
-
-@pytest.fixture
-def store(tmp_path):
-    return ChromaStore(path=str(tmp_path / "chroma"), collection_name="test")
 
 
 @pytest.fixture
@@ -1400,74 +1581,77 @@ def test_extract_pages_returns_one_entry_per_page(tmp_path):
     assert "page one" in pages[0].text
 
 
-def test_successful_ingest_marks_ready_with_counts(pdf_doc, store):
-    doc = ingest_document(pdf_doc, FakeEmbedder(), store, CFG)
+def test_successful_ingest_marks_ready_with_counts(pdf_doc, chroma_store, fake_embedder):
+    doc = ingest_document(pdf_doc, fake_embedder, chroma_store, CFG)
     assert doc.status == "ready"
     assert doc.page_count == 2
     assert doc.chunk_count > 0
     assert doc.chunk_count == Chunk.objects.filter(document=doc).count()
 
 
-def test_vectors_and_chunks_agree_after_ingest(pdf_doc, store):
-    doc = ingest_document(pdf_doc, FakeEmbedder(), store, CFG)
-    assert store.count() == doc.chunk_count
-    assert store.all_ids() == {c.vector_id for c in Chunk.objects.filter(document=doc)}
+def test_vectors_and_chunks_agree_after_ingest(pdf_doc, chroma_store, fake_embedder):
+    doc = ingest_document(pdf_doc, fake_embedder, chroma_store, CFG)
+    assert chroma_store.count() == doc.chunk_count
+    assert chroma_store.all_ids() == {c.vector_id for c in Chunk.objects.filter(document=doc)}
 
 
-def test_chunks_carry_real_page_numbers(pdf_doc, store):
-    ingest_document(pdf_doc, FakeEmbedder(), store, CFG)
+def test_chunks_carry_real_page_numbers(pdf_doc, chroma_store, fake_embedder):
+    ingest_document(pdf_doc, fake_embedder, chroma_store, CFG)
     assert set(Chunk.objects.values_list("page_number", flat=True)) == {1, 2}
 
 
-def test_embeddings_are_batched_in_one_call(pdf_doc, store):
-    embedder = FakeEmbedder()
-    ingest_document(pdf_doc, embedder, store, CFG)
-    assert embedder.calls == 1
+def test_embeddings_are_batched_in_one_call(pdf_doc, chroma_store, fake_embedder):
+    ingest_document(pdf_doc, fake_embedder, chroma_store, CFG)
+    assert fake_embedder.document_batches == 1
 
 
-def test_pdf_with_no_extractable_text_fails_with_a_useful_message(tmp_path, store):
+def test_pdf_with_no_extractable_text_fails_with_a_useful_message(
+    tmp_path, chroma_store, fake_embedder
+):
     path = make_blank_pdf(tmp_path / "scanned.pdf")
     doc = Document.objects.create(title="scanned.pdf")
     doc.file.save("scanned.pdf", ContentFile(path.read_bytes()), save=True)
 
-    result = ingest_document(doc, FakeEmbedder(), store, CFG)
+    result = ingest_document(doc, fake_embedder, chroma_store, CFG)
     assert result.status == "failed"
     assert "no extractable text" in result.error_message.lower()
     assert "ocr" in result.error_message.lower()
     assert Chunk.objects.count() == 0
-    assert store.count() == 0
+    assert chroma_store.count() == 0
 
 
-def test_embedding_failure_leaves_no_orphans(pdf_doc, store):
-    result = ingest_document(pdf_doc, ExplodingEmbedder(), store, CFG)
+def test_embedding_failure_leaves_no_orphans(pdf_doc, chroma_store):
+    result = ingest_document(pdf_doc, ExplodingEmbedder(), chroma_store, CFG)
     assert result.status == "failed"
     assert "ollama exploded" in result.error_message
     assert Chunk.objects.count() == 0
-    assert store.count() == 0
+    assert chroma_store.count() == 0
 
 
-def test_reingesting_the_same_document_does_not_duplicate(pdf_doc, store):
-    first = ingest_document(pdf_doc, FakeEmbedder(), store, CFG)
+def test_reingesting_the_same_document_does_not_duplicate(
+    pdf_doc, chroma_store, fake_embedder
+):
+    first = ingest_document(pdf_doc, fake_embedder, chroma_store, CFG)
     count = first.chunk_count
-    second = ingest_document(pdf_doc, FakeEmbedder(), store, CFG)
+    second = ingest_document(pdf_doc, fake_embedder, chroma_store, CFG)
     assert second.chunk_count == count
-    assert store.count() == count
+    assert chroma_store.count() == count
     assert Chunk.objects.filter(document=pdf_doc).count() == count
 
 
-def test_cleanup_removes_from_both_stores(pdf_doc, store):
-    ingest_document(pdf_doc, FakeEmbedder(), store, CFG)
-    cleanup_document(pdf_doc.id, store)
+def test_cleanup_removes_from_both_stores(pdf_doc, chroma_store, fake_embedder):
+    ingest_document(pdf_doc, fake_embedder, chroma_store, CFG)
+    cleanup_document(pdf_doc.id, chroma_store)
     assert Chunk.objects.filter(document=pdf_doc).count() == 0
-    assert store.count() == 0
+    assert chroma_store.count() == 0
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [ ] **Step 4: Run the tests to verify they fail**
 
 Run: `uv run pytest tests/integration/test_ingestion.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'documents.ingestion'`
 
-- [ ] **Step 4: Write `documents/ingestion.py`**
+- [ ] **Step 5: Write `documents/ingestion.py`**
 
 ```python
 """Ingestion orchestration.
@@ -1511,8 +1695,31 @@ def cleanup_document(document_id: int, store) -> None:
     Chunk.objects.filter(document_id=document_id).delete()
 
 
-def ingest_document(document: Document, embedder, store, cfg: RagConfig) -> Document:
+def _safe_cleanup(document_id: int, store) -> None:
+    """Cleanup that cannot itself abort the caller's error handling.
+
+    If Chroma is unreachable, a raising cleanup inside an except block would
+    propagate and skip the status write entirely, stranding the document in
+    `processing` forever with no error message. Residual orphans are the
+    lesser evil and are what `reconcile_vectors` exists to repair.
+    """
     try:
+        cleanup_document(document_id, store)
+    except Exception:
+        logger.exception(
+            "cleanup failed for document %s; orphans may remain, run reconcile_vectors",
+            document_id,
+        )
+
+
+def ingest_document(document: Document, embedder, store, cfg: RagConfig) -> Document:
+    previous_status = document.status
+    destroyed_previous = False
+
+    try:
+        # Everything failure-prone happens BEFORE any stored data is touched, so
+        # a transient Ollama outage during re-ingest cannot destroy a document
+        # that is currently ready and searchable.
         pages = extract_pages(document.file.path)
         page_count = len(pages)
 
@@ -1522,8 +1729,9 @@ def ingest_document(document: Document, embedder, store, cfg: RagConfig) -> Docu
 
         embeddings = embedder.embed_documents([d.text for d in drafts])
 
-        # Re-ingest of an existing document must converge, not accumulate.
+        # From here on the old state is gone; re-ingest must converge, not accumulate.
         cleanup_document(document.id, store)
+        destroyed_previous = True
 
         store.upsert(
             ids=[f"{document.id}_{d.chunk_index}" for d in drafts],
@@ -1555,21 +1763,31 @@ def ingest_document(document: Document, embedder, store, cfg: RagConfig) -> Docu
 
     except Exception as exc:
         logger.exception("ingestion failed for document %s", document.id)
-        cleanup_document(document.id, store)
-        document.status = "failed"
+
+        if destroyed_previous:
+            # We had already torn down the old state, so a partial new state is
+            # all that can remain. Clear it and mark the document failed.
+            _safe_cleanup(document.id, store)
+            document.status = "failed"
+            document.chunk_count = 0
+        else:
+            # Nothing stored was touched. A document that was already ready is
+            # still complete and searchable — a transient Ollama outage during
+            # re-ingest must not cost the user a working document.
+            document.status = "failed" if previous_status != "ready" else "ready"
+
         document.error_message = str(exc)
-        document.chunk_count = 0
         document.save(update_fields=["status", "error_message", "chunk_count"])
 
     return document
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/integration/test_ingestion.py -v`
 Expected: PASS — 9 tests
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add backend/documents/ingestion.py backend/tests/
@@ -1616,23 +1834,13 @@ def client():
 
 
 @pytest.fixture(autouse=True)
-def isolated_services(tmp_path, monkeypatch):
-    """Point the views at a throwaway Chroma and a fake embedder."""
+def isolated_services(chroma_store, fake_embedder, monkeypatch):
+    """Point the views at a throwaway Chroma and the shared fake embedder."""
     import documents.services as services
-    from rag.vectorstore import ChromaStore
 
-    store = ChromaStore(path=str(tmp_path / "chroma"), collection_name="test")
-
-    class FakeEmbedder:
-        def embed_documents(self, texts):
-            return [[float(len(t) % 10)] * 768 for t in texts]
-
-        def embed_query(self, text):
-            return [float(len(text) % 10)] * 768
-
-    monkeypatch.setattr(services, "get_store", lambda: store)
-    monkeypatch.setattr(services, "get_embedder", lambda: FakeEmbedder())
-    return store
+    monkeypatch.setattr(services, "get_store", lambda: chroma_store)
+    monkeypatch.setattr(services, "get_embedder", lambda: fake_embedder)
+    return chroma_store
 
 
 def _pdf_upload(tmp_path, name="mono.pdf"):
@@ -1711,13 +1919,24 @@ from rag.config import load_config
 from rag.embeddings import OllamaEmbedder
 from rag.vectorstore import ChromaStore
 
+import threading
+
 _store: ChromaStore | None = None
+_store_lock = threading.Lock()
 
 
 def get_store() -> ChromaStore:
+    """Process-wide Chroma handle.
+
+    Double-checked locking because concurrent first requests can race:
+    concurrent first requests would otherwise race chromadb's tenant
+    initialisation, which fails loudly and non-deterministically.
+    """
     global _store
     if _store is None:
-        _store = ChromaStore(path=str(settings.CHROMA_PATH))
+        with _store_lock:
+            if _store is None:
+                _store = ChromaStore(path=str(settings.CHROMA_PATH))
     return _store
 
 
@@ -1728,8 +1947,9 @@ def get_embedder() -> OllamaEmbedder:
 - [ ] **Step 4: Write `documents/views.py`**
 
 ```python
-import json
+import logging
 
+from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
@@ -1740,6 +1960,21 @@ from . import services
 from .ingestion import cleanup_document, ingest_document
 from .models import Document
 
+logger = logging.getLogger(__name__)
+
+
+def _redact(message: str) -> str:
+    """Strip absolute server paths before an error reaches a client.
+
+    Full detail stays in the server log; the client gets the cause without the
+    filesystem layout.
+    """
+    if not message:
+        return message
+    for root, label in ((str(settings.MEDIA_ROOT), "<media>"), (str(settings.BASE_DIR), "<app>")):
+        message = message.replace(root, label)
+    return message
+
 
 def _serialize(doc: Document) -> dict:
     return {
@@ -1749,7 +1984,7 @@ def _serialize(doc: Document) -> dict:
         "page_count": doc.page_count,
         "chunk_count": doc.chunk_count,
         "uploaded_at": doc.uploaded_at.isoformat(),
-        "error_message": doc.error_message,
+        "error_message": _redact(doc.error_message),
     }
 
 
@@ -1774,8 +2009,18 @@ def _upload(request):
             {"error": f"file exceeds the {cfg.max_upload_mb}MB limit"}, status=413
         )
 
+    # Resolve dependencies BEFORE creating the row. If Chroma or the embedder
+    # cannot be constructed, no Document should exist at all — a row created
+    # here would be stranded in `processing` with nothing left to advance it.
+    try:
+        store = services.get_store()
+        embedder = services.get_embedder()
+    except Exception as exc:
+        logger.exception("could not initialise ingestion services")
+        return JsonResponse({"error": f"ingestion services unavailable: {exc}"}, status=503)
+
     document = Document.objects.create(title=upload.name, file=upload)
-    document = ingest_document(document, services.get_embedder(), services.get_store(), cfg)
+    document = ingest_document(document, embedder, store, cfg)
     return JsonResponse(_serialize(document), status=201)
 
 
@@ -1928,7 +2173,10 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         store = get_store()
         vector_ids = store.all_ids()
-        chunks = {c.vector_id: c for c in Chunk.objects.select_related("document")}
+        chunks = {
+            c.vector_id: c
+            for c in Chunk.objects.only("id", "document_id", "chunk_index")
+        }
 
         missing_vectors = set(chunks) - vector_ids     # chunk row, no vector
         orphan_vectors = vector_ids - set(chunks)      # vector, no chunk row
@@ -1944,15 +2192,31 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("Run with --fix to repair."))
             return
 
-        for vector_id in orphan_vectors:
-            document_id = int(vector_id.split("_")[0])
-            store.delete_document(document_id)
+        # Delete exactly the orphaned ids — never a whole document. Deleting by
+        # document_id would take that document's valid vectors with it, turning
+        # a harmless orphan into an unsearchable `ready` document: strictly
+        # worse than the drift being repaired. It also removes the id parse,
+        # so a malformed id can no longer abort the run.
+        if orphan_vectors:
+            store.delete_ids(sorted(orphan_vectors))
+            still_present = store.all_ids() & orphan_vectors
+            self.stdout.write(
+                f"removed {len(orphan_vectors) - len(still_present)} orphan vector(s)"
+            )
+            if still_present:
+                self.stdout.write(
+                    self.style.WARNING(f"{len(still_present)} orphan(s) could not be removed")
+                )
 
+        # Independent of the orphan cleanup above. A document that reads `ready`
+        # while being unsearchable is the more damaging drift, and must not be
+        # left unmarked because orphan removal had a problem.
         affected = {chunks[v].document_id for v in missing_vectors}
         if affected:
             Document.objects.filter(id__in=affected).update(
                 status="failed", error_message=REUPLOAD_MESSAGE
             )
+            self.stdout.write(f"marked {len(affected)} document(s) failed")
 
         self.stdout.write(self.style.SUCCESS("Repair complete."))
 ```
@@ -2109,15 +2373,31 @@ from __future__ import annotations
 
 import re
 
-TOKEN_RE = re.compile(r"\w+", re.UNICODE)
+# A decimal number with an optional unit suffix is ONE token. Splitting
+# "0.5mg" into ["0", "5mg"] and dropping the orphaned "0" made a pediatric
+# 0.5mg question byte-identical to an adult 5mg one — a dosage confusion
+# originating in the tokenizer. The decimal branch must come first.
+TOKEN_RE = re.compile(r"\d+(?:\.\d+)+\w*|\w+", re.UNICODE)
 MIN_TERM_LENGTH = 2
 MAX_TERMS = 24
+
+# Function words carry no retrieval signal but make every question match almost
+# every chunk once OR-joined. That would leave the confidence gate's
+# `lexical_support` signal permanently True and collapse its middle band.
+STOPWORDS = frozenset(
+    """
+    a an and are as at be been but by can could did do does for from had has have
+    how i if in into is it its may might must of on or shall should that the their
+    them then there these they this to was were what when where which who why will
+    with would you your
+    """.split()
+)
 
 
 def build_fts_query(question: str) -> str:
     seen: list[str] = []
     for raw in TOKEN_RE.findall(question.lower()):
-        if len(raw) < MIN_TERM_LENGTH or raw in seen:
+        if len(raw) < MIN_TERM_LENGTH or raw in STOPWORDS or raw in seen:
             continue
         seen.append(raw)
         if len(seen) >= MAX_TERMS:
@@ -2145,12 +2425,17 @@ SQL = """
     FROM chunk_fts f
     JOIN documents_chunk c ON c.id = f.rowid
     WHERE chunk_fts MATCH %s
-    ORDER BY bm25(f)
+    ORDER BY bm25(chunk_fts)
     LIMIT %s
 """
 
 
 def search(question: str, limit: int) -> list[str]:
+    # FTS5 auxiliary functions (bm25/highlight/snippet) do not resolve table
+    # aliases — only the literal table name — so `bm25(f)` raises
+    # "no such column: f". The `f` alias is fine on the JOIN's f.rowid.
+    if not isinstance(limit, int) or limit <= 0:
+        return []
     expression = build_fts_query(question)
     if not expression:
         return []
@@ -2370,7 +2655,7 @@ def test_mean_similarity_does_not_affect_the_decision():
     passing unnoticed."""
     low = evaluate_gate(signals(top=0.80, mean=0.01), CFG)
     high = evaluate_gate(signals(top=0.80, mean=0.79), CFG)
-    assert low.proceed == high.proceed == True
+    assert low.proceed is True and high.proceed is True
     assert low.reason == high.reason
 
 
@@ -2404,11 +2689,18 @@ offline over thousands of parameter combinations (spec 6.5).
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from .config import GateConfig
 
 REASONS = ("ok", "off_domain", "weak_unsupported", "empty_corpus")
+
+
+def _jsonable(value: float) -> float | None:
+    """NaN and infinity are not valid JSON — json.dumps emits a bare NaN token
+    that strict parsers reject — so gate_signals stores None instead."""
+    return value if math.isfinite(value) else None
 
 
 @dataclass(frozen=True)
@@ -2420,8 +2712,8 @@ class GateSignals:
 
     def as_dict(self) -> dict:
         return {
-            "top_similarity": self.top_similarity,
-            "mean_similarity": self.mean_similarity,
+            "top_similarity": _jsonable(self.top_similarity),
+            "mean_similarity": _jsonable(self.mean_similarity),
             "lexical_support": self.lexical_support,
             "corpus_empty": self.corpus_empty,
         }
@@ -2439,6 +2731,13 @@ def evaluate_gate(signals: GateSignals, cfg: GateConfig) -> GateDecision:
 
     if signals.corpus_empty:
         return GateDecision(False, "empty_corpus", payload)
+
+    # A non-finite similarity must fail CLOSED. NaN compares False against every
+    # threshold, so without this guard it falls through every check and reaches
+    # `ok` — the most permissive outcome from the most degenerate input, in the
+    # one component whose job is to decline when uncertain.
+    if not math.isfinite(signals.top_similarity):
+        return GateDecision(False, "off_domain", payload)
 
     if signals.top_similarity < cfg.tau_abstain:
         return GateDecision(False, "off_domain", payload)
@@ -2627,8 +2926,9 @@ SYSTEM_TEMPLATE = """You are a clinical reference assistant for the user's uploa
 Answer only using the context below, drawn from documents the user has uploaded.
 Do not draw on general knowledge beyond what is in the context.
 
-If the context does not contain enough information to answer the question, reply with
-exactly {sentinel} and nothing else. Do not apologise, explain, or add any other text.
+If the context does not contain enough information to answer the question, your
+entire response must be the exact characters {sentinel} — nothing before it,
+nothing after it, no greeting, no explanation, no punctuation.
 
 When you do answer, cite the numbered sources you used, like [1] or [2].
 Your answers are for informational reference only and are not a substitute for
@@ -2658,16 +2958,30 @@ def format_context(chunks: list[ContextChunk]) -> str:
 
 
 def _trim_history(history: list[dict], max_history: int, history_chars: int) -> list[dict]:
+    """Keep the most recent turns that fit the character budget.
+
+    Skips an oversized message rather than stopping, so one long turn (a pasted
+    lab report) does not also discard smaller, older turns that would have fit.
+    Then drops any leading assistant turn: an assistant message with no user
+    message before it is malformed conversation and gives the model a reply to
+    a question it cannot see.
+
+    Oversized messages are skipped, not truncated — a half-quoted dose or
+    contraindication is worse than an absent one.
+    """
     recent = history[-max_history:] if max_history else []
     kept: list[dict] = []
     budget = history_chars
     for message in reversed(recent):
         cost = len(message["content"])
         if cost > budget:
-            break
+            continue
         budget -= cost
         kept.append(message)
-    return list(reversed(kept))
+    kept.reverse()
+    while kept and kept[0]["role"] == "assistant":
+        kept.pop(0)
+    return kept
 
 
 def build_messages(
@@ -2677,6 +2991,11 @@ def build_messages(
     max_history: int = 4,
     history_chars: int = 2000,
 ) -> list[dict]:
+    if not chunks:
+        # Answering with no retrieved context is the failure this whole system
+        # exists to prevent. Callers must decline via the gate instead.
+        raise ValueError("build_messages requires at least one context chunk")
+
     system = SYSTEM_TEMPLATE.format(sentinel=SENTINEL, context=format_context(chunks))
     return [
         {"role": "system", "content": system},
@@ -2837,6 +3156,7 @@ from .ollama import OllamaUnavailable
 from .prompts import SENTINEL
 
 BUFFER_CHARS = 40
+PREAMBLE_TOLERANCE = 24
 
 
 def _http_stream(url: str, payload: dict) -> Iterator[dict]:
@@ -2848,6 +3168,8 @@ def _http_stream(url: str, payload: dict) -> Iterator[dict]:
                     yield json.loads(line)
     except httpx.HTTPError as exc:
         raise OllamaUnavailable(f"chat request failed: {exc}") from exc
+    except ValueError as exc:  # json.JSONDecodeError subclasses ValueError
+        raise OllamaUnavailable(f"chat stream returned invalid JSON: {exc}") from exc
 
 
 def stream_chat(
@@ -2863,6 +3185,22 @@ def stream_chat(
             yield content
 
 
+def _is_sentinel(buffer: str, sentinel: str = SENTINEL) -> bool:
+    """True when the buffered head is a refusal rather than an answer.
+
+    Tolerates a short conversational preamble. The prompt forbids one, but an
+    8B instruct model may still emit "Sure! INSUFFICIENT_CONTEXT", and a missed
+    refusal is doubly bad: the model answers when it should have declined, and
+    the raw sentinel token leaks into the user's visible stream. A real answer
+    that happens to contain the sentinel this early is not a plausible output.
+    """
+    stripped = buffer.lstrip()
+    if stripped.startswith(sentinel):
+        return True
+    position = stripped.find(sentinel)
+    return 0 <= position <= PREAMBLE_TOLERANCE
+
+
 def filter_sentinel(
     deltas: Iterable[str],
     sentinel: str = SENTINEL,
@@ -2873,7 +3211,10 @@ def filter_sentinel(
     The sentinel commonly arrives split across deltas, so the decision waits
     until the buffer holds enough characters to be conclusive.
     """
-    threshold = max(len(sentinel), buffer_chars)
+    # The buffer must hold a tolerated preamble AND the full sentinel, or the
+    # decision fires before the sentinel has finished arriving, locks in a false
+    # negative, and leaks the raw token to the user.
+    threshold = max(buffer_chars, PREAMBLE_TOLERANCE + len(sentinel))
     buffer = ""
     decided = False
 
@@ -2884,14 +3225,14 @@ def filter_sentinel(
         buffer += delta
         if len(buffer) >= threshold:
             decided = True
-            if buffer.lstrip().startswith(sentinel):
+            if _is_sentinel(buffer, sentinel):
                 yield ("declined", None)
                 return
             yield ("token", buffer)
             buffer = ""
 
     if not decided and buffer:
-        if buffer.lstrip().startswith(sentinel):
+        if _is_sentinel(buffer, sentinel):
             yield ("declined", None)
         else:
             yield ("token", buffer)
@@ -2975,42 +3316,14 @@ import pytest
 from chat.retrieval import retrieve
 from documents.models import Chunk, Document
 from rag.config import load_config
-from rag.vectorstore import ChromaStore
 
 pytestmark = pytest.mark.django_db
 
 CFG = load_config(env={})
 
 
-class StubEmbedder:
-    """Maps known text to fixed vectors so distances are predictable."""
-
-    VECTORS = {
-        "metformin": [1.0, 0.0, 0.0],
-        "atenolol": [0.0, 1.0, 0.0],
-        "france": [0.0, 0.0, 1.0],
-    }
-
-    def _vector(self, text):
-        for key, vec in self.VECTORS.items():
-            if key in text.lower():
-                return vec
-        return [0.0, 0.0, 1.0]
-
-    def embed_documents(self, texts):
-        return [self._vector(t) for t in texts]
-
-    def embed_query(self, text):
-        return self._vector(text)
-
-
 @pytest.fixture
-def store(tmp_path):
-    return ChromaStore(path=str(tmp_path / "chroma"), collection_name="test")
-
-
-@pytest.fixture
-def seeded(store):
+def seeded(chroma_store, fake_embedder):
     doc = Document.objects.create(title="Monograph", status="ready")
     chunks = [
         Chunk.objects.create(document=doc, chunk_index=0, page_number=1,
@@ -3018,24 +3331,23 @@ def seeded(store):
         Chunk.objects.create(document=doc, chunk_index=1, page_number=2,
                              text="Atenolol is a beta blocker for hypertension."),
     ]
-    embedder = StubEmbedder()
-    store.upsert(
+    chroma_store.upsert(
         ids=[c.vector_id for c in chunks],
-        embeddings=embedder.embed_documents([c.text for c in chunks]),
+        embeddings=fake_embedder.embed_documents([c.text for c in chunks]),
         metadatas=[{"document_id": doc.id, "chunk_index": c.chunk_index} for c in chunks],
     )
     return doc
 
 
-def test_empty_corpus_short_circuits_before_retrieval(store):
-    result = retrieve("anything", StubEmbedder(), store, CFG)
+def test_empty_corpus_short_circuits_before_retrieval(chroma_store, fake_embedder):
+    result = retrieve("anything", fake_embedder, chroma_store, CFG)
     assert result.decision.proceed is False
     assert result.decision.reason == "empty_corpus"
     assert result.chunks == []
 
 
-def test_on_topic_question_proceeds_with_hydrated_chunks(seeded, store):
-    result = retrieve("metformin dose", StubEmbedder(), store, CFG)
+def test_on_topic_question_proceeds_with_hydrated_chunks(seeded, chroma_store, fake_embedder):
+    result = retrieve("metformin dose", fake_embedder, chroma_store, CFG)
     assert result.decision.proceed is True
     assert result.chunks
     assert "Metformin" in result.chunks[0].text
@@ -3043,28 +3355,34 @@ def test_on_topic_question_proceeds_with_hydrated_chunks(seeded, store):
     assert result.chunks[0].page_number == 1
 
 
-def test_off_domain_question_declines(seeded, store):
-    result = retrieve("what is the capital of france", StubEmbedder(), store, CFG)
+def test_off_domain_question_declines(seeded, chroma_store, fake_embedder):
+    result = retrieve("what is the capital of france", fake_embedder, chroma_store, CFG)
     assert result.decision.proceed is False
     assert result.decision.reason == "off_domain"
 
 
-def test_gate_signals_are_populated_for_observability(seeded, store):
-    result = retrieve("metformin dose", StubEmbedder(), store, CFG)
+def test_gate_signals_are_populated_for_observability(seeded, chroma_store, fake_embedder):
+    result = retrieve("metformin dose", fake_embedder, chroma_store, CFG)
     assert set(result.decision.signals) == {
         "top_similarity", "mean_similarity", "lexical_support", "corpus_empty"
     }
 
 
-def test_chunks_are_limited_to_top_k(seeded, store):
-    result = retrieve("metformin", StubEmbedder(), store, CFG)
+def test_chunks_are_limited_to_top_k(seeded, chroma_store, fake_embedder):
+    result = retrieve("metformin", fake_embedder, chroma_store, CFG)
     assert len(result.chunks) <= CFG.retrieval.top_k
 
 
-def test_vector_ids_with_no_sqlite_row_are_dropped_not_crashed(seeded, store):
+def test_vector_ids_with_no_sqlite_row_are_dropped_not_crashed(
+    seeded, chroma_store, fake_embedder
+):
     """An orphaned vector must not break a query (spec 10)."""
-    store.upsert(["999_0"], [[1.0, 0.0, 0.0]], [{"document_id": 999, "chunk_index": 0}])
-    result = retrieve("metformin dose", StubEmbedder(), store, CFG)
+    chroma_store.upsert(
+        ["999_0"],
+        fake_embedder.embed_documents(["metformin"]),
+        [{"document_id": 999, "chunk_index": 0}],
+    )
+    result = retrieve("metformin dose", fake_embedder, chroma_store, CFG)
     assert all(c.chunk_id != "999_0" for c in result.chunks)
 ```
 
@@ -3152,7 +3470,13 @@ def retrieve(question: str, embedder, store, cfg: RagConfig) -> RetrievalResult:
     signals = GateSignals(
         top_similarity=top_similarity,
         mean_similarity=mean_similarity,
-        lexical_support=bool(top_ids) and top_ids[0] in set(lexical_ids),
+        # "Does the question's terminology appear in the text we are about to
+        # show the model?" — measured across all delivered chunks, not just the
+        # top one. Using top_ids[0] alone made this hinge on RRF tie-breaking:
+        # when the legs disagree completely, both rank-1 items score 1/(k+1) and
+        # the winner is decided by lexicographic chunk_id sort, so the same
+        # disagreement produced either answer depending on document numbering.
+        lexical_support=bool(set(top_ids) & set(lexical_ids)),
         corpus_empty=False,
     )
     decision = evaluate_gate(signals, cfg.gate)
@@ -3238,32 +3562,15 @@ def read_frames(response) -> list[dict]:
     return [json.loads(line) for line in body.splitlines() if line.strip()]
 
 
-class StubEmbedder:
-    VECTORS = {"metformin": [1.0, 0.0, 0.0], "france": [0.0, 0.0, 1.0]}
-
-    def _vector(self, text):
-        for key, vec in self.VECTORS.items():
-            if key in text.lower():
-                return vec
-        return [0.0, 0.0, 1.0]
-
-    def embed_documents(self, texts):
-        return [self._vector(t) for t in texts]
-
-    def embed_query(self, text):
-        return self._vector(text)
-
-
 @pytest.fixture
-def wired(tmp_path, monkeypatch):
-    """Wire the view to a throwaway store, stub embedder, and scripted LLM."""
+def wired(chroma_store, fake_embedder, monkeypatch):
+    """Wire the view to a throwaway store, the shared fake embedder, and a
+    scripted LLM. Mutate `script` in a test to change what the model returns."""
     import chat.views as views
     import documents.services as services
-    from rag.vectorstore import ChromaStore
 
-    store = ChromaStore(path=str(tmp_path / "chroma"), collection_name="test")
-    monkeypatch.setattr(services, "get_store", lambda: store)
-    monkeypatch.setattr(services, "get_embedder", lambda: StubEmbedder())
+    monkeypatch.setattr(services, "get_store", lambda: chroma_store)
+    monkeypatch.setattr(services, "get_embedder", lambda: fake_embedder)
 
     script = {"deltas": ["The adult dose ", "is 500mg [1]."]}
 
@@ -3273,19 +3580,22 @@ def wired(tmp_path, monkeypatch):
         yield from script["deltas"]
 
     monkeypatch.setattr(views, "stream_chat", fake_stream)
-    return store, script
+    return chroma_store, script
 
 
 @pytest.fixture
-def seeded(wired):
+def seeded(wired, fake_embedder):
     store, _ = wired
     doc = Document.objects.create(title="Monograph", status="ready")
     chunk = Chunk.objects.create(
         document=doc, chunk_index=0, page_number=3,
         text="Metformin adult starting dose is 500mg twice daily.",
     )
-    store.upsert([chunk.vector_id], [[1.0, 0.0, 0.0]],
-                 [{"document_id": doc.id, "chunk_index": 0}])
+    store.upsert(
+        [chunk.vector_id],
+        fake_embedder.embed_documents([chunk.text]),
+        [{"document_id": doc.id, "chunk_index": 0}],
+    )
     return doc
 
 
@@ -3672,7 +3982,7 @@ make_pdf(pathlib.Path('/tmp/sample.pdf'), [
   'Metformin: the adult starting dose is 500mg taken twice daily with meals.',
   'Atenolol: 50mg once daily for hypertension in adults.',
 ])"
-uv run uvicorn medical_rag.asgi:application --port 8000 &
+uv run python manage.py runserver 8000 --noreload &
 curl -s -F "file=@/tmp/sample.pdf" localhost:8000/api/documents/ | python3 -m json.tool
 curl -N -s localhost:8000/api/chat/ -H 'Content-Type: application/json' \
      -d '{"question":"what is the adult dose?","session_id":null}'
