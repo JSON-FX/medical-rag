@@ -2373,15 +2373,31 @@ from __future__ import annotations
 
 import re
 
-TOKEN_RE = re.compile(r"\w+", re.UNICODE)
+# A decimal number with an optional unit suffix is ONE token. Splitting
+# "0.5mg" into ["0", "5mg"] and dropping the orphaned "0" made a pediatric
+# 0.5mg question byte-identical to an adult 5mg one — a dosage confusion
+# originating in the tokenizer. The decimal branch must come first.
+TOKEN_RE = re.compile(r"\d+(?:\.\d+)+\w*|\w+", re.UNICODE)
 MIN_TERM_LENGTH = 2
 MAX_TERMS = 24
+
+# Function words carry no retrieval signal but make every question match almost
+# every chunk once OR-joined. That would leave the confidence gate's
+# `lexical_support` signal permanently True and collapse its middle band.
+STOPWORDS = frozenset(
+    """
+    a an and are as at be been but by can could did do does for from had has have
+    how i if in into is it its may might must of on or shall should that the their
+    them then there these they this to was were what when where which who why will
+    with would you your
+    """.split()
+)
 
 
 def build_fts_query(question: str) -> str:
     seen: list[str] = []
     for raw in TOKEN_RE.findall(question.lower()):
-        if len(raw) < MIN_TERM_LENGTH or raw in seen:
+        if len(raw) < MIN_TERM_LENGTH or raw in STOPWORDS or raw in seen:
             continue
         seen.append(raw)
         if len(seen) >= MAX_TERMS:
@@ -2409,12 +2425,17 @@ SQL = """
     FROM chunk_fts f
     JOIN documents_chunk c ON c.id = f.rowid
     WHERE chunk_fts MATCH %s
-    ORDER BY bm25(f)
+    ORDER BY bm25(chunk_fts)
     LIMIT %s
 """
 
 
 def search(question: str, limit: int) -> list[str]:
+    # FTS5 auxiliary functions (bm25/highlight/snippet) do not resolve table
+    # aliases — only the literal table name — so `bm25(f)` raises
+    # "no such column: f". The `f` alias is fine on the JOIN's f.rowid.
+    if not isinstance(limit, int) or limit <= 0:
+        return []
     expression = build_fts_query(question)
     if not expression:
         return []
