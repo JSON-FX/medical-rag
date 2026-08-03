@@ -93,6 +93,14 @@ def test_done_frame_shape_is_fixed(seeded):
     assert done["decline_reason"] is None
 
 
+def test_answered_turn_persists_assistant_message_exactly_once(seeded):
+    """Guards the `finally`-block persistence in `chat.views.generate`: a
+    naive fix could persist twice (once from a flag set post-yield, once as
+    a disconnect safety net). Only one call site exists, so this must hold."""
+    read_frames(_ask("metformin dose"))
+    assert ChatMessage.objects.filter(role="assistant").count() == 1
+
+
 # --- path 2: stage-1 decline -------------------------------------------
 
 def test_off_domain_question_declines_without_sources(seeded):
@@ -143,6 +151,15 @@ def test_stage_two_decline_persists_as_declined(seeded, wired):
     assert assistant.retrieved_sources == []
 
 
+def test_stage_two_decline_persists_assistant_message_exactly_once(seeded, wired):
+    """Same guard as the answered path, for the branch that used to build the
+    decline text and persist inside a `finally` that also yielded."""
+    _, script = wired
+    script["deltas"] = [SENTINEL]
+    read_frames(_ask("metformin pediatric dose"))
+    assert ChatMessage.objects.filter(role="assistant").count() == 1
+
+
 # --- path 4: ollama down ------------------------------------------------
 
 def test_ollama_failure_emits_an_error_frame(seeded, wired):
@@ -187,3 +204,35 @@ def test_blank_question_returns_400(seeded):
 
 def test_response_content_type_is_ndjson(seeded):
     assert _ask("metformin dose")["Content-Type"] == "application/x-ndjson"
+
+
+# --- malformed input ------------------------------------------------------
+#
+# These exercise input validation in `chat()`, which runs before retrieval or
+# the LLM is ever touched, so they need neither `wired` nor `seeded` — a real
+# `load_config()` runs, but it only reads env defaults (no network, no DB).
+
+def test_non_string_question_returns_400():
+    """`{"question": 5}` used to reach `.strip()` on an int and 500."""
+    assert _ask(5).status_code == 400
+
+
+def test_boolean_question_returns_400():
+    """`isinstance(True, int)` is True but `isinstance(True, str)` is False,
+    so this must be rejected the same way as any other non-string question."""
+    assert _ask(True).status_code == 400
+
+
+def test_non_dict_json_body_returns_400():
+    """A bare JSON array has no `.get`, so this used to 500 with an
+    AttributeError before reaching the `question` check at all."""
+    response = Client().post(
+        "/api/chat/", data=json.dumps([1, 2, 3]), content_type="application/json"
+    )
+    assert response.status_code == 400
+
+
+def test_non_uuid_session_id_returns_400():
+    """A `session_id` that isn't a UUID used to blow up inside the queryset
+    filter with `ValueError: badly formed hexadecimal UUID string`."""
+    assert _ask("metformin dose", session_id="not-a-uuid").status_code == 400

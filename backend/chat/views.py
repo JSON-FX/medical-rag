@@ -1,6 +1,7 @@
 import json
+import uuid
 
-from django.http import Http404, JsonResponse, StreamingHttpResponse
+from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
@@ -114,15 +115,24 @@ def chat(request):
     except json.JSONDecodeError:
         return JsonResponse({"error": "invalid JSON body"}, status=400)
 
-    question = (payload.get("question") or "").strip()
-    if not question:
-        return JsonResponse({"error": "question is required"}, status=400)
+    if not isinstance(payload, dict):
+        return JsonResponse({"error": "body must be a JSON object"}, status=400)
+
+    question = payload.get("question")
+    if not isinstance(question, str) or not question.strip():
+        return JsonResponse({"error": "question must be a non-empty string"}, status=400)
+    question = question.strip()
 
     cfg = load_config()
     session_id = payload.get("session_id")
-    session = (
-        ChatSession.objects.filter(id=session_id).first() if session_id else None
-    ) or ChatSession.objects.create(title=question[:80])
+    session = None
+    if session_id is not None:
+        try:
+            session = ChatSession.objects.filter(id=uuid.UUID(str(session_id))).first()
+        except (ValueError, AttributeError, TypeError):
+            return JsonResponse({"error": "session_id must be a valid UUID"}, status=400)
+    if session is None:
+        session = ChatSession.objects.create(title=question[:80])
 
     history = _history(session, cfg.history_messages)
     ChatMessage.objects.create(session=session, role="user", content=question)
@@ -159,11 +169,14 @@ def chat(request):
         declined = False
         truncated = False
         sources_sent = False
+        decline_body = ""
+        message = None
 
         try:
             for kind, text in filter_sentinel(stream_chat(cfg.ollama, messages)):
                 if kind == "declined":
                     declined = True
+                    decline_body = decline_text("insufficient_context")
                     break
                 if not sources_sent:
                     # Emitted only now: both gates have cleared (spec 7.1).
@@ -180,21 +193,29 @@ def chat(request):
             )
             yield frame("error", code=code, message=str(exc))
         finally:
+            # Persistence lives here, and ONLY here, so it runs exactly once no
+            # matter which of the four ways generate() ends: normal completion,
+            # a stage-2 sentinel decline (the `break` above), a handled
+            # OllamaError (the `except` above), or a client disconnect that
+            # closes this generator mid-stream. A `finally` block runs exactly
+            # once per generator teardown, there is a single `_persist` call
+            # site here, and this block never yields — so there is no flag to
+            # race and no second write to trigger. (A `persisted` flag set
+            # *after* yielding the frames would not be safe: if the generator
+            # is closed at exactly that yield, GeneratorExit fires before the
+            # flag is set, `finally` still runs, and sees the flag unset —
+            # a second, spurious persist. Doing the write only here, before
+            # anything downstream can observe or interrupt it, avoids that
+            # race entirely.) On disconnect, Python throws GeneratorExit at
+            # whatever `yield` was in flight; that propagates through this
+            # `finally` (which neither catches it nor yields) straight out of
+            # generate(), so the code below never runs and no frame is
+            # written after teardown has started.
             if declined:
-                body = decline_text("insufficient_context")
-                yield frame("token", text=body)
                 message = _persist(
-                    session, body, [], True, "insufficient_context", signals, False
-                )
-                yield frame(
-                    "done",
-                    message_id=message.id,
-                    was_declined=True,
-                    decline_reason="insufficient_context",
-                    truncated=False,
+                    session, decline_body, [], True, "insufficient_context", signals, False
                 )
             else:
-                # Runs even on client disconnect, so partial answers survive.
                 message = _persist(
                     session,
                     "".join(collected),
@@ -204,14 +225,35 @@ def chat(request):
                     signals,
                     truncated,
                 )
-                yield frame(
-                    "done",
-                    message_id=message.id,
-                    was_declined=False,
-                    decline_reason=None,
-                    truncated=truncated,
-                )
 
+        # Only reached if the try/finally above completed without propagating
+        # an exception. On a client disconnect it is skipped entirely (see the
+        # comment in `finally`) — correctly, since nobody is listening on a
+        # closed connection.
+        if declined:
+            yield frame("token", text=decline_body)
+            yield frame(
+                "done",
+                message_id=message.id,
+                was_declined=True,
+                decline_reason="insufficient_context",
+                truncated=False,
+            )
+        else:
+            yield frame(
+                "done",
+                message_id=message.id,
+                was_declined=False,
+                decline_reason=None,
+                truncated=truncated,
+            )
+
+    # Served under WSGI. StreamingHttpResponse cannot async-iterate a SYNC
+    # generator, so under ASGI Django drains the whole generator in a threadpool
+    # before sending anything — measured: every token arriving at once at 9.5s
+    # versus progressive delivery starting at 0.7s under WSGI. WSGI also calls
+    # close() on client disconnect, which is what makes the persistence below
+    # reliable; ASGI never delivers GeneratorExit for a sync generator.
     response = StreamingHttpResponse(generate(), content_type="application/x-ndjson")
     response["Cache-Control"] = "no-cache"
     response["X-Accel-Buffering"] = "no"
