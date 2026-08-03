@@ -1142,6 +1142,23 @@ class ChromaStore:
         result = self._collection.delete(where={"document_id": document_id})
         return (result or {}).get("deleted", 0)
 
+    def delete_ids(self, ids: list[str]) -> int:
+        """Delete exactly these vector ids.
+
+        reconcile_vectors needs this rather than delete_document: an orphaned
+        vector usually sits alongside valid ones for the same document, and
+        deleting by document_id would take the valid ones with it — turning a
+        harmless orphan into an unsearchable `ready` document.
+
+        The returned count is Chroma's and can overcount (deleting an id that
+        does not exist still reports 1), so callers needing an accurate figure
+        should verify against all_ids().
+        """
+        if not ids:
+            return 0
+        result = self._collection.delete(ids=ids)
+        return (result or {}).get("deleted", 0)
+
     def all_ids(self) -> set[str]:
         """Used by reconcile_vectors (Task 9)."""
         return set(self._collection.get(include=[])["ids"])
@@ -2156,7 +2173,10 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         store = get_store()
         vector_ids = store.all_ids()
-        chunks = {c.vector_id: c for c in Chunk.objects.select_related("document")}
+        chunks = {
+            c.vector_id: c
+            for c in Chunk.objects.only("id", "document_id", "chunk_index")
+        }
 
         missing_vectors = set(chunks) - vector_ids     # chunk row, no vector
         orphan_vectors = vector_ids - set(chunks)      # vector, no chunk row
@@ -2172,15 +2192,31 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("Run with --fix to repair."))
             return
 
-        for vector_id in orphan_vectors:
-            document_id = int(vector_id.split("_")[0])
-            store.delete_document(document_id)
+        # Delete exactly the orphaned ids — never a whole document. Deleting by
+        # document_id would take that document's valid vectors with it, turning
+        # a harmless orphan into an unsearchable `ready` document: strictly
+        # worse than the drift being repaired. It also removes the id parse,
+        # so a malformed id can no longer abort the run.
+        if orphan_vectors:
+            store.delete_ids(sorted(orphan_vectors))
+            still_present = store.all_ids() & orphan_vectors
+            self.stdout.write(
+                f"removed {len(orphan_vectors) - len(still_present)} orphan vector(s)"
+            )
+            if still_present:
+                self.stdout.write(
+                    self.style.WARNING(f"{len(still_present)} orphan(s) could not be removed")
+                )
 
+        # Independent of the orphan cleanup above. A document that reads `ready`
+        # while being unsearchable is the more damaging drift, and must not be
+        # left unmarked because orphan removal had a problem.
         affected = {chunks[v].document_id for v in missing_vectors}
         if affected:
             Document.objects.filter(id__in=affected).update(
                 status="failed", error_message=REUPLOAD_MESSAGE
             )
+            self.stdout.write(f"marked {len(affected)} document(s) failed")
 
         self.stdout.write(self.style.SUCCESS("Repair complete."))
 ```
