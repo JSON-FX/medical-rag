@@ -110,3 +110,69 @@ def test_lexical_support_is_false_when_no_delivered_chunk_was_found_lexically(
     )
     result = retrieve("zzzquux nonexistent terminology", fake_embedder, chroma_store, CFG)
     assert result.decision.signals["lexical_support"] is False
+
+
+def _seed_two_docs(store, embedder):
+    """Two single-chunk documents, so the legs can be forced to disagree."""
+    chunks = []
+    for title, text in (("A", "metformin dosing guidance"), ("B", "atenolol dosing guidance")):
+        doc = Document.objects.create(title=title, status="ready")
+        chunk = Chunk.objects.create(document=doc, chunk_index=0, page_number=1, text=text)
+        store.upsert(
+            [chunk.vector_id],
+            embedder.embed_documents([text]),
+            [{"document_id": doc.id, "chunk_index": 0}],
+        )
+        chunks.append(chunk)
+    return chunks
+
+
+def test_lexical_support_is_stable_under_reversed_document_id_ordering(
+    chroma_store, fake_embedder, monkeypatch
+):
+    """The pre-fix bug: with the legs disjoint, RRF ties and the fused winner was
+    decided by lexicographic chunk_id sort, so this signal flipped depending on
+    which document happened to have the lower id — for the very signal the gate
+    uses to adjudicate the near-miss band.
+    """
+    from chat import retrieval as retrieval_mod
+
+    first, second = _seed_two_docs(chroma_store, fake_embedder)
+
+    observed = []
+    for only_match in ([first.vector_id], [second.vector_id]):
+        monkeypatch.setattr(
+            retrieval_mod, "lexical_search", lambda q, limit, _m=only_match: _m
+        )
+        observed.append(
+            retrieve("metformin dosing", fake_embedder, chroma_store, CFG)
+            .decision.signals["lexical_support"]
+        )
+
+    assert len(set(observed)) == 1, f"support flipped with document id order: {observed}"
+    assert observed == [True, True]
+
+
+def test_lexical_support_true_when_any_delivered_chunk_was_found_lexically(
+    chroma_store, fake_embedder, monkeypatch
+):
+    from chat import retrieval as retrieval_mod
+
+    _first, second = _seed_two_docs(chroma_store, fake_embedder)
+    monkeypatch.setattr(
+        retrieval_mod, "lexical_search", lambda q, limit: [second.vector_id]
+    )
+    result = retrieve("metformin dosing", fake_embedder, chroma_store, CFG)
+    assert result.decision.signals["lexical_support"] is True
+
+
+def test_lexical_support_false_when_the_lexical_leg_finds_nothing(
+    chroma_store, fake_embedder, monkeypatch
+):
+    """A question whose terms appear nowhere yields an empty lexical leg."""
+    from chat import retrieval as retrieval_mod
+
+    _seed_two_docs(chroma_store, fake_embedder)
+    monkeypatch.setattr(retrieval_mod, "lexical_search", lambda q, limit: [])
+    result = retrieve("metformin dosing", fake_embedder, chroma_store, CFG)
+    assert result.decision.signals["lexical_support"] is False
