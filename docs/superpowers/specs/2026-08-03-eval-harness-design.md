@@ -76,13 +76,39 @@ The fixture builder therefore selects sections, and records what it selected:
 - `overdosage`
 - `pregnancy`
 
-Each withheld section is a near-miss axis across all three drugs: nine questions whose absence from
-the corpus is a **property of the build**, not an assumption about the source. The builder writes
-`fixtures/manifest.json` recording per drug which sections were included, which were withheld, and
-their character counts, so any label in `questions.yaml` can be audited against it.
+### 2.2.1 Withholding a section is necessary but NOT sufficient — absence must be measured
 
-A near-miss question is valid only if it targets a withheld section of a drug that IS in the corpus.
-That is checkable, and §5 makes it a test.
+Reading the actual label text before writing the plan caught a second layer of the same mistake.
+Metformin's **included** `dosage_and_administration` section contains:
+
+> "**Pediatric Dosage** for metformin hydrochloride tablets: Starting dose: 500 mg orally twice a
+> day, with meals … up to a maximum of 2000 mg per day"
+
+Amoxicillin's contains "In Pediatric Patients over 3 Months of Age, 20 to 45 mg/kg/day". So
+withholding the `pediatric_use` *section* does not make pediatric dosing *absent* — for two of three
+drugs it is right there in the shipped text, and "what is the pediatric dose of metformin?" is
+answerable.
+
+**Absence is therefore verified by keyword scan over the included text, not inferred from section
+names.** The builder scans the assembled corpus for each candidate axis and records which
+`(drug, axis)` pairs are genuinely absent. Measured:
+
+| axis | metformin | atenolol | amoxicillin |
+|---|---|---|---|
+| pediatric | present (7) | **absent** | present (13) |
+| overdose | **absent** | **absent** | present (1) |
+| pregnancy | **absent** | **absent** | present (1) |
+| geriatric | **absent** | present (6) | **absent** |
+| hepatic impairment | **absent** | **absent** | **absent** |
+| renal dosing | present (4) | present (6) | present (6) |
+
+That yields **ten verified-absent pairs** — enough for the nine-question near-miss bucket. Renal
+dosing is present in all three, making it a good `answerable` axis.
+
+Section withholding is retained because it removes the obvious source, but the **manifest's
+`verified_absent` list is the authority**. A `near_miss` question is valid only if its `(drug, axis)`
+pair appears there, and §5 makes that a test — so a future corpus change that reintroduces pediatric
+text would fail the suite rather than silently converting near-misses into answerable questions.
 
 ### 2.3 Reproducibility — one network boundary
 
@@ -105,14 +131,18 @@ in the Phase 2 notes.
 
 | Bucket | Construction | Expected | Target |
 |---|---|---|---|
-| `answerable` | Facts in an included section | answer | ~14 |
-| `near_miss` | Facts in a **withheld** section of a corpus drug | decline | ~9 |
+| `answerable` | Facts present in the included text | answer | ~14 |
+| `near_miss` | A `(drug, axis)` pair the manifest lists as **verified absent** | decline | ~9 |
 | `off_corpus_medical` | Real medical questions about drugs not in the corpus (warfarin, insulin, …) | decline | ~9 |
 | `off_domain` | Non-medical entirely | decline | ~8 |
 
 Each entry carries `id`, `bucket`, `question`, `expected` (`answer` \| `decline`), and — for
-`answerable` and `near_miss` — the `drug` and `section` it targets, which is what makes §5's
-validation possible.
+`answerable` and `near_miss` — the `drug` and `axis` it targets, which is what makes §5's validation
+possible.
+
+The nine near-misses draw from the ten verified-absent pairs in §2.2.1: hepatic impairment for all
+three drugs, overdose and pregnancy for metformin and atenolol, geriatric for metformin and
+amoxicillin, and pediatric for atenolol.
 
 Questions are authored by hand against the committed fixture text. They are not generated, because a
 generated question set would be measuring the generator.
@@ -185,9 +215,14 @@ system those are the ones that justify its existence.
 
 The harness is a measurement tool, not production code, but three properties are worth pinning:
 
-- **Question-set validity** — every `near_miss` targets a section the manifest records as withheld,
-  for a drug that is in the corpus; every `answerable` targets an included section. A near-miss that
-  is secretly answerable would corrupt the headline result silently.
+- **Question-set validity** — every `near_miss` targets a `(drug, axis)` pair the manifest records as
+  `verified_absent`; every `answerable` targets a drug in the corpus. A near-miss that is secretly
+  answerable would corrupt the headline result silently, and this exact mistake was made twice while
+  designing this phase — once assuming the source had no pediatric section, once assuming that
+  withholding that section removed pediatric content. The test is the thing that stops a third.
+- **Manifest accuracy** — re-running the keyword scan over the committed corpus reproduces the
+  manifest's `verified_absent` list. If a corpus change reintroduces withheld content, the suite
+  fails rather than silently reclassifying near-misses.
 - **Sweep determinism** — the same `signals.json` produces byte-identical `eval_results.md`. The
   sweep must be a pure replay.
 - **Metric arithmetic** — precision/recall computed against a hand-built confusion matrix.
