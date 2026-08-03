@@ -17,3 +17,16 @@ def test_real_ollama_query_and_document_embeddings_differ():
     doc = embedder.embed_documents(["metformin dosing"])[0]
     query = embedder.embed_query("metformin dosing")
     assert doc != query, "prefixes must actually reach the model"
+
+
+def test_real_ollama_chat_streams_content_deltas():
+    from rag.generation import stream_chat
+
+    deltas = list(
+        stream_chat(
+            OllamaConfig(),
+            [{"role": "user", "content": "Reply with exactly: hello"}],
+        )
+    )
+    assert len(deltas) >= 1
+    assert "hello" in "".join(deltas).lower()
