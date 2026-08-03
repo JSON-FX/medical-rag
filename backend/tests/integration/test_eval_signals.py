@@ -65,3 +65,19 @@ def test_lexical_support_carries_signal(records):
     off_domain_lex = sum(r["lexical_support"] for r in records if r["bucket"] == "off_domain")
     answerable_lex = sum(r["lexical_support"] for r in records if r["bucket"] == "answerable")
     assert answerable_lex > off_domain_lex, "lexical_support carries no signal"
+
+
+def test_every_question_reached_the_model(records):
+    # The unconditional LLM call is what lets the sweep model what stage 2 would
+    # have done at a lower threshold. A record with no retrieved chunks has
+    # sentinel_fired=False meaning UNKNOWN, which the sweep cannot distinguish
+    # from "the model answered".
+    starved = [r["id"] for r in records if not r["retrieved"]]
+    assert not starved, f"no chunks retrieved, so the model was never called: {starved}"
+
+
+def test_no_question_retrieved_a_duplicate_chunk(records):
+    # Duplicate corpus copies tie in rank fusion and displace relevant chunks
+    # out of the top-k. Distinct chunk ids per question is the cheap proxy.
+    for r in records:
+        assert len(r["retrieved"]) == len(set(r["retrieved"])), f"{r['id']} retrieved a duplicate"

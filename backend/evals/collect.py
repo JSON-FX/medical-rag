@@ -10,15 +10,25 @@ which is exactly what the near_miss bucket exists to measure (spec 4.2).
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import tempfile
-
-import django
-import os
+from dataclasses import replace
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "medical_rag.settings")
+
+# Isolated database per run. The collect pass creates Documents, and without
+# this they accumulate: three corpus copies had built up, and duplicate chunks
+# tied in rank fusion and displaced a relevant chunk out of the top-k, which
+# refused a question that is genuinely answerable.
+_EVAL_DB_DIR = tempfile.mkdtemp(prefix="medical_rag_eval_")
+os.environ["DJANGO_DB_NAME"] = str(pathlib.Path(_EVAL_DB_DIR) / "eval.sqlite3")
+
+import django  # noqa: E402
+
 django.setup()
 
+from django.core.management import call_command  # noqa: E402
 import yaml  # noqa: E402
 from django.core.files.base import ContentFile  # noqa: E402
 
@@ -66,6 +76,7 @@ def run_llm(question: str, chunks, cfg) -> tuple[bool, str]:
 
 
 def main() -> None:
+    call_command("migrate", verbosity=0)
     cfg = load_config()
     questions = yaml.safe_load(QUESTIONS.read_text())
 
@@ -75,17 +86,31 @@ def main() -> None:
 
         print("ingesting corpus...")
         total = ingest_corpus(store, embedder, cfg)
-        print(f"  {total} chunks total\n")
+        print(f"  {total} chunks total across {Document.objects.count()} documents\n")
+
+        # The gate must not decide whether the model is called. Signals are
+        # threshold-independent, so retrieving with a permissive gate records
+        # the SAME signals while guaranteeing chunks hydrate for every
+        # question — which is what lets the sweep model "what would stage 2
+        # have done if a lower threshold had let this through?".
+        permissive = replace(cfg, gate=replace(cfg.gate, tau_abstain=-1.0, tau_strong=-1.0))
 
         records = []
         for i, q in enumerate(questions, start=1):
             result = retrieve(q["question"], embedder, store, cfg)
+            forced = retrieve(q["question"], embedder, store, permissive)
             signals = result.decision.signals
 
             # Unconditional: we need stage 2's behaviour even where the gate
             # declined, so the sweep can model a lower threshold letting it by.
-            if result.chunks:
-                sentinel_fired, answer = run_llm(q["question"], result.chunks, cfg)
+            # retrieve() only hydrates chunks when ITS OWN gate proceeds, so
+            # calling it just once with the real config would silently skip
+            # the model whenever the default gate declines. The permissive
+            # retrieve forces chunks to hydrate regardless of that decision;
+            # `signals` and `gate_reason_at_defaults` still come from the
+            # real-config call above.
+            if forced.chunks:
+                sentinel_fired, answer = run_llm(q["question"], forced.chunks, cfg)
             else:
                 sentinel_fired, answer = False, ""
 
@@ -102,7 +127,7 @@ def main() -> None:
                 "gate_reason_at_defaults": result.decision.reason,
                 "sentinel_fired": sentinel_fired,
                 "answer": answer[:400],
-                "retrieved": [c.chunk_id for c in result.chunks],
+                "retrieved": [c.chunk_id for c in forced.chunks],
             })
             print(f"  [{i:2}/{len(questions)}] {q['id']} {q['bucket']:19} "
                   f"top={signals['top_similarity']:.4f} lex={signals['lexical_support']!s:5} "
