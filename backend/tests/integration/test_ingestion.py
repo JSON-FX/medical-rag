@@ -90,3 +90,50 @@ def test_cleanup_removes_from_both_stores(pdf_doc, chroma_store, fake_embedder):
     cleanup_document(pdf_doc.id, chroma_store)
     assert Chunk.objects.filter(document=pdf_doc).count() == 0
     assert chroma_store.count() == 0
+
+
+def test_failed_reingest_preserves_a_working_document(pdf_doc, chroma_store, fake_embedder):
+    """A transient Ollama outage during re-ingest must not cost the user a
+    document that is currently ready and searchable."""
+    first = ingest_document(pdf_doc, fake_embedder, chroma_store, CFG)
+    assert first.status == "ready"
+    original_count = first.chunk_count
+    original_ids = chroma_store.all_ids()
+
+    result = ingest_document(pdf_doc, ExplodingEmbedder(), chroma_store, CFG)
+
+    assert result.status == "ready", "a working document was destroyed by a failed re-ingest"
+    assert result.chunk_count == original_count
+    assert Chunk.objects.filter(document=pdf_doc).count() == original_count
+    assert chroma_store.all_ids() == original_ids
+    assert "ollama exploded" in result.error_message
+
+
+def test_first_ingest_failure_still_marks_failed(pdf_doc, chroma_store):
+    """A document that was never ready has nothing to preserve."""
+    result = ingest_document(pdf_doc, ExplodingEmbedder(), chroma_store, CFG)
+    assert result.status == "failed"
+    assert result.chunk_count == 0
+    assert Chunk.objects.count() == 0
+    assert chroma_store.count() == 0
+
+
+def test_cleanup_failure_does_not_strand_document_in_processing(pdf_doc, chroma_store, fake_embedder):
+    """If Chroma is unreachable during cleanup, the document must still get a
+    terminal status and a message — not sit in `processing` forever."""
+    ingest_document(pdf_doc, fake_embedder, chroma_store, CFG)
+
+    class BrokenStore:
+        def delete_document(self, document_id):
+            raise RuntimeError("chroma unreachable")
+        def upsert(self, *a, **k):
+            raise RuntimeError("chroma unreachable")
+        def count(self):
+            return 0
+        def all_ids(self):
+            return set()
+
+    result = ingest_document(pdf_doc, fake_embedder, BrokenStore(), CFG)
+    assert result.status in {"ready", "failed"}, "document stranded in processing"
+    assert result.status != "processing"
+    assert result.error_message
