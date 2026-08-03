@@ -11,12 +11,23 @@ from __future__ import annotations
 
 import re
 
-NEAR_MISS_AXES: dict[str, list[str]] = {
-    "pediatric": [r"pediatric", r"children", r"\bchild\b", r"infant", r"neonate", r"adolescent"],
-    "overdose": [r"overdos", r"toxicity", r"ingestion of amounts"],
-    "pregnancy": [r"pregnan", r"lactation", r"nursing", r"breast-?feed", r"teratogen"],
-    "geriatric": [r"geriatric", r"elderly", r"older patients"],
-    "hepatic": [r"hepatic impairment", r"liver impairment", r"hepatic dysfunction"],
+NEAR_MISS_AXES: dict[str, str] = {
+    # STEMS, not literal phrases. Literal matching failed twice: "hepatic
+    # impairment" missed metformin's "history of liver disease" and amoxicillin's
+    # "Liver: A moderate rise in AST", so the scan reported hepatic absent while
+    # the corpus discussed it. A false ABSENCE is the dangerous direction — it
+    # ships a near-miss that is actually answerable, counted as a false decline
+    # at every operating point.
+    "pediatric": r"pediatr|paediatr|\bchild|infant|neonat|adolescen|juvenile|newborn",
+    "overdose": r"overdos|poison|toxicit|\btoxic\b|acute ingestion",
+    "pregnancy": r"pregnan|lactat|nursing mother|breast-?feed|teratogen|fetal|foetal|\bfetus",
+    "geriatric": r"geriatr|elderly|older patient|advanced age|\b65 years",
+    "hepatic": r"hepat|\bliver\b",
+    "renal": r"renal|kidney|creatinine|eGFR|nephro",
+    "carcinogen": r"carcinogen|mutagen|tumou?r|malignan",
+    "immunization": r"immuni[sz]|vaccin",
+    "driving": r"driving|operate machinery|machinery",
+    "storage": r"\bstorage\b|store at|room temperature|excursions permitted",
 }
 
 
@@ -24,7 +35,5 @@ def verified_absent_axes(text: str) -> list[str]:
     """Axes with no keyword anywhere in `text`, sorted for stable manifests."""
     lowered = text.lower()
     return sorted(
-        axis
-        for axis, patterns in NEAR_MISS_AXES.items()
-        if not any(re.search(p, lowered) for p in patterns)
+        axis for axis, pattern in NEAR_MISS_AXES.items() if not re.search(pattern, lowered)
     )

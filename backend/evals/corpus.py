@@ -45,9 +45,14 @@ def assemble_text(included: dict[str, str]) -> str:
     return "\n\n".join(parts)
 
 
+def corpus_text(title: str, included: dict[str, str]) -> str:
+    """The exact string build_pdf renders — so the absence scan and the shipped
+    corpus can never disagree about what the document contains."""
+    return f"{title}\n\n{assemble_text(included)}"
+
+
 def build_pdf(path: pathlib.Path, title: str, included: dict[str, str]) -> pathlib.Path:
-    body = f"{title}\n\n{assemble_text(included)}"
-    return make_pdf(path, _paginate(body))
+    return make_pdf(path, _paginate(corpus_text(title, included)))
 
 
 def load_manifest() -> dict:

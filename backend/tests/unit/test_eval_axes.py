@@ -38,3 +38,27 @@ def test_real_label_phrasings_are_detected():
 
 def test_absent_axes_are_sorted_for_stable_manifests():
     assert verified_absent_axes("x") == sorted(verified_absent_axes("x"))
+
+
+def test_hepatic_matches_the_phrasings_real_labels_actually_use():
+    """Literal "hepatic impairment" missed all of these in the real corpus."""
+    for text in (
+        "in patients with a history of liver disease, alcoholism, or heart failure",
+        "Cholestatic, hepatocellular, and mixed hepatocellular liver injury",
+        "Liver: A moderate rise in AST and/or ALT has been noted",
+        "decreased hepatic, renal, or cardiac function",
+    ):
+        assert "hepatic" not in verified_absent_axes(text), f"missed: {text!r}"
+
+
+def test_pediatric_matches_varied_phrasings():
+    for text in ("In Pediatric Patients over 3 Months", "safety in children",
+                 "neonates and infants", "adolescent patients"):
+        assert "pediatric" not in verified_absent_axes(text)
+
+
+def test_every_axis_pattern_is_a_string_not_a_list():
+    """The type changed to one alternation per axis; a list would silently
+    make re.search treat it as a pattern object and misbehave."""
+    for axis, pattern in NEAR_MISS_AXES.items():
+        assert isinstance(pattern, str), f"{axis} is {type(pattern)}"
