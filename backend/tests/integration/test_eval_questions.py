@@ -70,6 +70,24 @@ def test_off_corpus_questions_do_not_name_a_corpus_drug(questions, manifest):
         assert not named, f"{q['id']} names corpus drug(s) {named}"
 
 
+def test_off_corpus_questions_do_not_name_a_drug_class_the_corpus_belongs_to(questions, manifest):
+    """Naming a drug NAME is the obvious collision; naming its CLASS is the
+    subtle one. Amoxicillin self-identifies as "a penicillin-class antibacterial",
+    so an off-corpus question mentioning penicillin partly retrieves corpus text."""
+    from evals.corpus import corpus_text, load_drug
+
+    corpus = " ".join(
+        corpus_text(slug.title(), load_drug(slug)["included"]).lower() for slug in manifest["drugs"]
+    )
+    class_terms = ["penicillin", "beta-lactam", "biguanide", "beta blocker", "cephalosporin"]
+    present = [t for t in class_terms if t in corpus]
+    for q in questions:
+        if q["bucket"] != "off_corpus_medical":
+            continue
+        named = [t for t in present if t in q["question"].lower()]
+        assert not named, f"{q['id']} names corpus drug class(es) {named}"
+
+
 def test_bucket_counts_are_balanced(questions):
     counts = {b: sum(1 for q in questions if q["bucket"] == b) for b in BUCKETS}
     assert counts["answerable"] >= 12, counts
