@@ -79,3 +79,48 @@ def test_delete_removes_document_chunks_and_vectors(client, tmp_path, isolated_s
 
 def test_delete_missing_document_returns_404(client):
     assert client.delete("/api/documents/999/").status_code == 404
+
+
+def test_service_initialisation_failure_creates_no_stranded_document(tmp_path, monkeypatch):
+    """If Chroma cannot be constructed, no Document row should exist at all —
+    a row created first would sit in `processing` with nothing to advance it."""
+    import documents.services as services
+
+    def boom():
+        raise RuntimeError("could not connect to tenant default_tenant")
+
+    monkeypatch.setattr(services, "get_store", boom)
+    resp = Client().post("/api/documents/", {"file": _pdf_upload(tmp_path)})
+    assert resp.status_code == 503
+    assert Document.objects.count() == 0, "document stranded in processing"
+
+
+def test_error_message_does_not_leak_absolute_server_paths(client, tmp_path, settings):
+    """error_message reaches the API client; it must not carry the server's
+    filesystem layout."""
+    doc = Document.objects.create(
+        title="x.pdf",
+        status="failed",
+        error_message=f"[Errno 2] No such file or directory: '{settings.MEDIA_ROOT}/documents/x.pdf'",
+    )
+    body = json.loads(client.get("/api/documents/").content)
+    entry = next(d for d in body if d["id"] == doc.id)
+    assert str(settings.MEDIA_ROOT) not in entry["error_message"]
+    assert "<media>" in entry["error_message"]
+
+
+def test_get_store_is_safe_under_concurrent_first_construction(tmp_path, settings):
+    """Sync views run in uvicorn's threadpool; concurrent first requests must
+    not race chromadb's tenant initialisation."""
+    import importlib
+    from concurrent.futures import ThreadPoolExecutor
+    import documents.services as services
+
+    settings.CHROMA_PATH = tmp_path / "race"
+    importlib.reload(services)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        stores = [f.result() for f in [pool.submit(services.get_store) for _ in range(8)]]
+
+    assert len({id(s) for s in stores}) == 1, "more than one store constructed"
+    importlib.reload(services)

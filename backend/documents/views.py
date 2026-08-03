@@ -1,5 +1,6 @@
-import json
+import logging
 
+from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
@@ -10,6 +11,21 @@ from . import services
 from .ingestion import cleanup_document, ingest_document
 from .models import Document
 
+logger = logging.getLogger(__name__)
+
+
+def _redact(message: str) -> str:
+    """Strip absolute server paths before an error reaches a client.
+
+    Full detail stays in the server log; the client gets the cause without
+    the filesystem layout.
+    """
+    if not message:
+        return message
+    for root, label in ((str(settings.MEDIA_ROOT), "<media>"), (str(settings.BASE_DIR), "<app>")):
+        message = message.replace(root, label)
+    return message
+
 
 def _serialize(doc: Document) -> dict:
     return {
@@ -19,7 +35,7 @@ def _serialize(doc: Document) -> dict:
         "page_count": doc.page_count,
         "chunk_count": doc.chunk_count,
         "uploaded_at": doc.uploaded_at.isoformat(),
-        "error_message": doc.error_message,
+        "error_message": _redact(doc.error_message),
     }
 
 
@@ -44,8 +60,20 @@ def _upload(request):
             {"error": f"file exceeds the {cfg.max_upload_mb}MB limit"}, status=413
         )
 
+    # Resolve dependencies BEFORE creating the row. If Chroma or the embedder
+    # cannot be constructed, no Document should exist at all — a row created
+    # here would be stranded in `processing` with nothing left to advance it.
+    try:
+        store = services.get_store()
+        embedder = services.get_embedder()
+    except Exception as exc:
+        logger.exception("could not initialise ingestion services")
+        return JsonResponse(
+            {"error": f"ingestion services unavailable: {exc}"}, status=503
+        )
+
     document = Document.objects.create(title=upload.name, file=upload)
-    document = ingest_document(document, services.get_embedder(), services.get_store(), cfg)
+    document = ingest_document(document, embedder, store, cfg)
     return JsonResponse(_serialize(document), status=201)
 
 
