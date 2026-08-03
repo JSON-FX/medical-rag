@@ -7,6 +7,12 @@ from __future__ import annotations
 import pathlib
 
 
+def _escape(text: str) -> str:
+    """PDF string literals need \\, ( and ) escaped. FDA label text is full of
+    parentheses, and an unbalanced one corrupts the file."""
+    return text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
+
+
 def make_pdf(path: pathlib.Path, pages: list[str]) -> pathlib.Path:
     objects: list[bytes] = []
     page_ids = [4 + i * 2 for i in range(len(pages))]
@@ -17,7 +23,7 @@ def make_pdf(path: pathlib.Path, pages: list[str]) -> pathlib.Path:
     objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
 
     for i, text in enumerate(pages):
-        content = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode()
+        content = f"BT /F1 12 Tf 72 720 Td ({_escape(text)}) Tj ET".encode()
         objects.append(
             f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
             f"/Resources << /Font << /F1 3 0 R >> >> /Contents {5 + i * 2} 0 R >>".encode()

@@ -35,7 +35,7 @@
 | overdose | **absent** | **absent** | present |
 | pregnancy | **absent** | **absent** | present |
 | geriatric | **absent** | present | **absent** |
-| hepatic | **absent** | **absent** | **absent** |
+| hepatic | **absent** | **absent** | present (adverse_reactions: "Hepatic dysfunction") |
 | renal dosing | present | present | present |
 
 ---
@@ -550,8 +550,8 @@ targets a `(drug, axis)` pair the manifest lists as verified absent.
    question: "How should metformin be dosed in patients with hepatic impairment?"}
 - {id: n02, bucket: near_miss, expected: decline, drug: atenolol, axis: hepatic,
    question: "Does atenolol require a dose adjustment in liver impairment?"}
-- {id: n03, bucket: near_miss, expected: decline, drug: amoxicillin, axis: hepatic,
-   question: "What is the amoxicillin dose for a patient with hepatic dysfunction?"}
+- {id: n03, bucket: near_miss, expected: decline, drug: amoxicillin, axis: geriatric,
+   question: "How should amoxicillin be dosed in elderly patients?"}
 - {id: n04, bucket: near_miss, expected: decline, drug: metformin, axis: overdose,
    question: "What should be done in the event of a metformin overdose?"}
 - {id: n05, bucket: near_miss, expected: decline, drug: atenolol, axis: overdose,

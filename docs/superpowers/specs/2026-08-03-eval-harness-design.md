@@ -99,10 +99,10 @@ names.** The builder scans the assembled corpus for each candidate axis and reco
 | overdose | **absent** | **absent** | present (1) |
 | pregnancy | **absent** | **absent** | present (1) |
 | geriatric | **absent** | present (6) | **absent** |
-| hepatic impairment | **absent** | **absent** | **absent** |
+| hepatic impairment | **absent** | **absent** | present — `adverse_reactions` says "Hepatic dysfunction" |
 | renal dosing | present (4) | present (6) | present (6) |
 
-That yields **ten verified-absent pairs** — enough for the nine-question near-miss bucket. Renal
+That yields **nine verified-absent pairs** — exactly the size of the near-miss bucket, with no spare. Renal
 dosing is present in all three, making it a good `answerable` axis.
 
 Section withholding is retained because it removes the obvious source, but the **manifest's
@@ -140,9 +140,9 @@ Each entry carries `id`, `bucket`, `question`, `expected` (`answer` \| `decline`
 `answerable` and `near_miss` — the `drug` and `axis` it targets, which is what makes §5's validation
 possible.
 
-The nine near-misses draw from the ten verified-absent pairs in §2.2.1: hepatic impairment for all
-three drugs, overdose and pregnancy for metformin and atenolol, geriatric for metformin and
-amoxicillin, and pediatric for atenolol.
+The nine near-misses use every verified-absent pair in §2.2.1: hepatic for metformin and atenolol,
+overdose and pregnancy for metformin and atenolol, geriatric for metformin and amoxicillin, and
+pediatric for atenolol. There is no spare pair — adding a near-miss requires widening the corpus.
 
 Questions are authored by hand against the committed fixture text. They are not generated, because a
 generated question set would be measuring the generator.
