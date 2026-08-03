@@ -78,3 +78,35 @@ def test_decision_is_frozen():
     assert isinstance(decision, GateDecision)
     with pytest.raises(Exception):
         decision.proceed = False
+
+
+def test_negative_similarity_is_off_domain_not_an_error():
+    """similarity = 1 - cosine_distance, and Chroma's distance ranges [0, 2],
+    so similarity legitimately goes negative for opposed vectors."""
+    for top in (-0.01, -0.5, -1.0):
+        decision = evaluate_gate(signals(top=top), CFG)
+        assert decision.proceed is False
+        assert decision.reason == "off_domain"
+
+
+def test_nan_similarity_fails_closed_rather_than_open():
+    """NaN compares False against every threshold, so an unguarded gate would
+    fall through to `ok` — the most permissive result from the worst input."""
+    decision = evaluate_gate(signals(top=float("nan")), CFG)
+    assert decision.proceed is False, "gate failed OPEN on NaN"
+    assert decision.reason == "off_domain"
+
+
+def test_infinite_similarity_fails_closed():
+    for top in (float("inf"), float("-inf")):
+        assert evaluate_gate(signals(top=top), CFG).proceed is False
+
+
+def test_gate_signals_are_json_serialisable_even_when_non_finite():
+    """gate_signals is a JSONField; a bare NaN token is not valid JSON."""
+    import json
+
+    payload = evaluate_gate(signals(top=float("nan"), mean=float("inf")), CFG).signals
+    encoded = json.dumps(payload)
+    assert "NaN" not in encoded and "Infinity" not in encoded
+    assert json.loads(encoded)["top_similarity"] is None
