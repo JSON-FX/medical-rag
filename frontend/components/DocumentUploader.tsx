@@ -5,6 +5,14 @@ import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { uploadDocument } from "@/lib/api";
 
+/**
+ * A fast-fail default, NOT a mirror of the server. The real limit is the
+ * MAX_UPLOAD_MB environment variable (rag/config.py), whose default this
+ * happens to match — but raise it there and this check stays strictly
+ * stricter, rejecting files the server would have accepted. Reading the
+ * server's value would cost a round trip to save a round trip, so the
+ * conservative constant stays: the client is stricter, never authoritative.
+ */
 const MAX_MB = 15;
 
 export default function DocumentUploader({ onUploaded }: { onUploaded: () => void }) {
@@ -17,8 +25,8 @@ export default function DocumentUploader({ onUploaded }: { onUploaded: () => voi
     if (!file) return;
     setError(null);
 
-    // Mirrors the server's rules so the failure is instant rather than a
-    // round trip; the server remains the authority (documents/views.py).
+    // Checked here so the failure is instant rather than a round trip. The
+    // server re-checks and remains the authority (documents/views.py).
     if (!file.name.toLowerCase().endsWith(".pdf")) {
       setError("Only PDF files are supported.");
       return;

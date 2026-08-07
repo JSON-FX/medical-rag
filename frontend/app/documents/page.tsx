@@ -13,7 +13,13 @@ export default function DocumentsPage() {
 
   const refresh = useCallback(() => {
     listDocuments()
-      .then(setDocuments)
+      .then((records) => {
+        setDocuments(records);
+        // Clearing on success matters because refresh() is called after every
+        // upload and delete: without it a "Failed to fetch" from one blip
+        // sits above a list that is visibly working again.
+        setError(null);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Could not load documents."));
   }, []);
 

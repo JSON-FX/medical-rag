@@ -55,6 +55,49 @@ test("ignores blank lines", async () => {
   expect(frames).toEqual([{ type: "token", text: "x" }]);
 });
 
+test("cancels the body when the consumer stops early", async () => {
+  // The user navigates away mid-answer and ChatWindow breaks out of the loop.
+  // Releasing the lock without cancelling leaves Django's streaming response
+  // unread and the connection held open until it times out.
+  let cancelled = false;
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode('{"type":"token","text":"a"}\n'));
+      controller.enqueue(encoder.encode('{"type":"token","text":"b"}\n'));
+      controller.close();
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+
+  for await (const frame of readFrames(stream)) {
+    void frame;
+    break;
+  }
+  expect(cancelled).toBe(true);
+});
+
+test("does not cancel a stream it read to the end", async () => {
+  let cancelled = false;
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode('{"type":"token","text":"a"}\n'));
+      controller.close();
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+
+  const out: Frame[] = [];
+  for await (const frame of readFrames(stream)) out.push(frame);
+  expect(out).toHaveLength(1);
+  expect(cancelled).toBe(false);
+});
+
 test("does not split a multi-byte character across chunks", async () => {
   // An em dash is three UTF-8 bytes; the decoder must stream, not decode
   // each chunk independently, or the character is corrupted.

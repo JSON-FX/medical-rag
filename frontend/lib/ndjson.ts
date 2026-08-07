@@ -18,6 +18,7 @@ export async function* readFrames(
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let drained = false;
 
   try {
     for (;;) {
@@ -37,7 +38,13 @@ export async function* readFrames(
 
     buffer += decoder.decode();
     if (buffer.trim()) yield JSON.parse(buffer) as Frame;
+    drained = true;
   } finally {
+    // A consumer that `break`s out of `for await` — or throws, or aborts —
+    // disposes this generator here with the body still open. Releasing the
+    // lock alone leaves the response unread and the connection held; cancel()
+    // tells the stream nobody is coming back for the rest.
+    if (!drained) await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }
