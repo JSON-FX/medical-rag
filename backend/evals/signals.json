@@ -1,0 +1,802 @@
+[
+ {
+  "id": "a01",
+  "bucket": "answerable",
+  "expected": "answer",
+  "drug": "metformin",
+  "axis": null,
+  "top_similarity": 0.8020635843276978,
+  "mean_similarity": 0.771069273352623,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": false,
+  "answer": "[1] states that the adult starting dose of metformin hydrochloride tablets is 500 mg orally twice a day or 850 mg once a day, given with meals. [2] also confirms this, stating that \"The recommended starting dose of metformin hydrochloride tablets are 500 mg orally twice a day or 850 mg once a day, given with meals.\"\n\nTherefore, the adult starting dose of metformin is either 500 mg orally twice a d",
+  "retrieved": [
+   "1_1",
+   "1_2",
+   "1_3",
+   "1_0"
+  ]
+ },
+ {
+  "id": "a02",
+  "bucket": "answerable",
+  "expected": "answer",
+  "drug": "metformin",
+  "axis": null,
+  "top_similarity": 0.8155256509780884,
+  "mean_similarity": 0.7671162635087967,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": false,
+  "answer": "The maximum daily dose of metformin is 2550 mg per day [1].",
+  "retrieved": [
+   "1_3",
+   "1_1",
+   "1_2",
+   "3_6"
+  ]
+ },
+ {
+  "id": "a03",
+  "bucket": "answerable",
+  "expected": "answer",
+  "drug": "metformin",
+  "axis": null,
+  "top_similarity": 0.8157427310943604,
+  "mean_similarity": 0.769405409693718,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": false,
+  "answer": "According to [1] and [2], metformin is contraindicated in patients with:\n\n* Severe renal impairment (eGFR below 30 mL/min/1.73 m^2)\n* Hypersensitivity to metformin\n* Acute or chronic metabolic acidosis, including diabetic ketoacidosis, with or without coma.\n\n([1] p. 4, [2] p. 3)",
+  "retrieved": [
+   "1_6",
+   "1_4",
+   "1_10",
+   "1_9"
+  ]
+ },
+ {
+  "id": "a04",
+  "bucket": "answerable",
+  "expected": "answer",
+  "drug": "metformin",
+  "axis": null,
+  "top_similarity": 0.8148736357688904,
+  "mean_similarity": 0.8013946413993835,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": false,
+  "answer": "Metformin is contraindicated in patients with an estimated glomerular filtration rate (eGFR) below 30 mL/minute/1.73 m^2 [1, 2].",
+  "retrieved": [
+   "1_4",
+   "1_6",
+   "1_2",
+   "1_5"
+  ]
+ },
+ {
+  "id": "a05",
+  "bucket": "answerable",
+  "expected": "answer",
+  "drug": "metformin",
+  "axis": null,
+  "top_similarity": 0.8117388486862183,
+  "mean_similarity": 0.7760561406612396,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": false,
+  "answer": "According to [1] (metformin.pdf, p. 1), the adult dosage for metformin hydrochloride tablets should be increased in increments of 500 mg weekly or 850 mg every 2 weeks.\n\nSimilarly, according to [3] (metformin.pdf, p. 2), the dose can also be increased on the basis of glycemic control and tolerability in increments of 500 mg weekly for pediatric patients 10 years of age and older.",
+  "retrieved": [
+   "1_1",
+   "1_3",
+   "1_2",
+   "1_14"
+  ]
+ },
+ {
+  "id": "a06",
+  "bucket": "answerable",
+  "expected": "answer",
+  "drug": "atenolol",
+  "axis": null,
+  "top_similarity": 0.8497051000595093,
+  "mean_similarity": 0.818681389093399,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": false,
+  "answer": "[1] The initial dose of atenolol is 50 mg given as one tablet a day either alone or added to diuretic therapy.\n\n[2] (For hypertensive patients) The initial dose of atenolol is 50 mg given as one tablet a day.",
+  "retrieved": [
+   "2_5",
+   "2_6",
+   "2_9",
+   "2_13"
+  ]
+ },
+ {
+  "id": "a07",
+  "bucket": "answerable",
+  "expected": "answer",
+  "drug": "atenolol",
+  "axis": null,
+  "top_similarity": 0.8177206516265869,
+  "mean_similarity": 0.8022047728300095,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": false,
+  "answer": "According to [1], the maximum oral dosage recommended for patients with renal impairment due to other causes and for elderly, renally-impaired patients is 50 mg daily. \n\n[1] (atenolol.pdf, p. 7)",
+  "retrieved": [
+   "2_13",
+   "2_6",
+   "2_5",
+   "2_9"
+  ]
+ },
+ {
+  "id": "a08",
+  "bucket": "answerable",
+  "expected": "answer",
+  "drug": "atenolol",
+  "axis": null,
+  "top_similarity": 0.8278891444206238,
+  "mean_similarity": 0.7987347543239594,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": false,
+  "answer": "According to [1] and [2], atenolol tablets are contraindicated in:\n\n* Sinus bradycardia\n* Heart block greater than first degree\n* Cardiogenic shock\n* Overt cardiac failure (as mentioned in both sources)\n* Hypersensitivity to the atenolol or any of the drug product's components\n\nNote that these contraindications are also consistent with the general information provided in [3] and [4].",
+  "retrieved": [
+   "2_15",
+   "2_14",
+   "2_10",
+   "2_11"
+  ]
+ },
+ {
+  "id": "a09",
+  "bucket": "answerable",
+  "expected": "answer",
+  "drug": "atenolol",
+  "axis": null,
+  "top_similarity": 0.8335926532745361,
+  "mean_similarity": 0.8108482956886292,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": false,
+  "answer": "According to [1], atenolol tablets are indicated for:\n\n* Hypertension (to lower blood pressure)\n* Angina pectoris (long-term management of patients with angina)\n* Acute myocardial infarction (management of hemodynamically stable patients with definite or suspected acute myocardial infarction to reduce cardiovascular mortality)\n\nAdditionally, [2] states that atenolol tablets may be indicated for th",
+  "retrieved": [
+   "2_0",
+   "2_4",
+   "1_0",
+   "2_11"
+  ]
+ },
+ {
+  "id": "a10",
+  "bucket": "answerable",
+  "expected": "answer",
+  "drug": "amoxicillin",
+  "axis": null,
+  "top_similarity": 0.785474419593811,
+  "mean_similarity": 0.7487878054380417,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": false,
+  "answer": "750 to 1750 mg/day in divided doses every 8 to 12 hours. [1] \n\nFor H. pylori Infection, the recommended adult oral dose for triple therapy is 1 gram amoxicillin twice daily (every 12 hours) and for dual therapy it is 1 gram amoxicillin three times daily (every 8 hours). [2]",
+  "retrieved": [
+   "3_6",
+   "3_11",
+   "3_5",
+   "3_0"
+  ]
+ },
+ {
+  "id": "a11",
+  "bucket": "answerable",
+  "expected": "answer",
+  "drug": "amoxicillin",
+  "axis": null,
+  "top_similarity": 0.807886004447937,
+  "mean_similarity": 0.7580881416797638,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": false,
+  "answer": "The recommended adult oral dose for amoxicillin triple therapy to eradicate H. pylori is 1 gram amoxicillin, 500 mg clarithromycin, and 30 mg lansoprazole, all given twice daily (every 12 hours) for 14 days. [2] [3]\n\nThis regimen matches the dual therapy regimen of 1 gram amoxicillin and 30 mg lansoprazole taken three times a day for 14 days, with clarithromycin added to create triple therapy.",
+  "retrieved": [
+   "3_2",
+   "3_6",
+   "3_11",
+   "3_16"
+  ]
+ },
+ {
+  "id": "a12",
+  "bucket": "answerable",
+  "expected": "answer",
+  "drug": "amoxicillin",
+  "axis": null,
+  "top_similarity": 0.7304577231407166,
+  "mean_similarity": 0.691724494099617,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": false,
+  "answer": "Patients who have experienced a serious hypersensitivity reaction (e.g., anaphylaxis or Stevens-Johnson syndrome) to amoxicillin tablets or to other penicillins [3, p. 7].",
+  "retrieved": [
+   "3_16",
+   "3_22",
+   "3_13",
+   "3_7"
+  ]
+ },
+ {
+  "id": "a13",
+  "bucket": "answerable",
+  "expected": "answer",
+  "drug": "amoxicillin",
+  "axis": null,
+  "top_similarity": 0.7890918254852295,
+  "mean_similarity": 0.7509699612855911,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": false,
+  "answer": "According to [1], amoxicillin can be given every 8 to 12 hours. Additionally, in Pediatric Patients over 3 Months of Age (section 2.3), it is recommended that the dose be \"in divided doses every 8 to 12 hours\". \n\n[1]",
+  "retrieved": [
+   "3_6",
+   "3_10",
+   "3_11",
+   "3_9"
+  ]
+ },
+ {
+  "id": "a14",
+  "bucket": "answerable",
+  "expected": "answer",
+  "drug": "metformin",
+  "axis": null,
+  "top_similarity": 0.813299834728241,
+  "mean_similarity": 0.7724060565233231,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": false,
+  "answer": "[1] lists the following clinically significant drug interactions with metformin:\n\n* Carbonic anhydrase inhibitors (e.g. topiramate, zonisamide, acetazolamide or dichlorphenamide) may increase the risk of lactic acidosis.\n\n[3] lists the following clinically significant drug interactions with metformin:\n\n* Insulin secretagogues or insulin may increase the risk of hypoglycemia.\n* Drugs that tend to p",
+  "retrieved": [
+   "1_12",
+   "1_11",
+   "1_14",
+   "1_8"
+  ]
+ },
+ {
+  "id": "n01",
+  "bucket": "near_miss",
+  "expected": "decline",
+  "drug": "metformin",
+  "axis": "hepatic",
+  "top_similarity": 0.759233295917511,
+  "mean_similarity": 0.7450119654337565,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "1_1",
+   "1_4",
+   "1_6",
+   "3_19"
+  ]
+ },
+ {
+  "id": "n02",
+  "bucket": "near_miss",
+  "expected": "decline",
+  "drug": "atenolol",
+  "axis": "hepatic",
+  "top_similarity": 0.7589901089668274,
+  "mean_similarity": 0.7445136308670044,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "2_11",
+   "2_21",
+   "2_13",
+   "2_6"
+  ]
+ },
+ {
+  "id": "n03",
+  "bucket": "near_miss",
+  "expected": "decline",
+  "drug": "amoxicillin",
+  "axis": "geriatric",
+  "top_similarity": 0.7595789432525635,
+  "mean_similarity": 0.7372609525918961,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "3_10",
+   "3_11",
+   "3_6",
+   "3_13"
+  ]
+ },
+ {
+  "id": "n04",
+  "bucket": "near_miss",
+  "expected": "decline",
+  "drug": "metformin",
+  "axis": "overdose",
+  "top_similarity": 0.7373155355453491,
+  "mean_similarity": 0.7301868995030721,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "1_4",
+   "1_13",
+   "1_15",
+   "3_16"
+  ]
+ },
+ {
+  "id": "n05",
+  "bucket": "near_miss",
+  "expected": "decline",
+  "drug": "atenolol",
+  "axis": "overdose",
+  "top_similarity": 0.7745990753173828,
+  "mean_similarity": 0.7386170923709869,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "2_0",
+   "2_4",
+   "2_8",
+   "2_10"
+  ]
+ },
+ {
+  "id": "n06",
+  "bucket": "near_miss",
+  "expected": "decline",
+  "drug": "metformin",
+  "axis": "pregnancy",
+  "top_similarity": 0.7215285301208496,
+  "mean_similarity": 0.7162402868270874,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "1_10",
+   "1_4",
+   "1_11",
+   "1_6"
+  ]
+ },
+ {
+  "id": "n07",
+  "bucket": "near_miss",
+  "expected": "decline",
+  "drug": "atenolol",
+  "axis": "pregnancy",
+  "top_similarity": 0.7115440368652344,
+  "mean_similarity": 0.6839645355939865,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "2_15",
+   "2_8",
+   "2_10",
+   "2_6"
+  ]
+ },
+ {
+  "id": "n08",
+  "bucket": "near_miss",
+  "expected": "decline",
+  "drug": "atenolol",
+  "axis": "pediatric",
+  "top_similarity": 0.7455885410308838,
+  "mean_similarity": 0.7153884917497635,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "2_6",
+   "3_6",
+   "2_9",
+   "3_10"
+  ]
+ },
+ {
+  "id": "n09",
+  "bucket": "near_miss",
+  "expected": "decline",
+  "drug": "metformin",
+  "axis": "geriatric",
+  "top_similarity": 0.7856777310371399,
+  "mean_similarity": 0.7663589268922806,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "1_3",
+   "1_1",
+   "1_2",
+   "1_4"
+  ]
+ },
+ {
+  "id": "o01",
+  "bucket": "off_corpus_medical",
+  "expected": "decline",
+  "drug": null,
+  "axis": null,
+  "top_similarity": 0.7389065027236938,
+  "mean_similarity": 0.688850149512291,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "1_6",
+   "2_15",
+   "2_14",
+   "3_22"
+  ]
+ },
+ {
+  "id": "o02",
+  "bucket": "off_corpus_medical",
+  "expected": "decline",
+  "drug": null,
+  "axis": null,
+  "top_similarity": 0.7002421617507935,
+  "mean_similarity": 0.6778671890497208,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "2_5",
+   "1_3",
+   "1_2",
+   "3_6"
+  ]
+ },
+ {
+  "id": "o03",
+  "bucket": "off_corpus_medical",
+  "expected": "decline",
+  "drug": null,
+  "axis": null,
+  "top_similarity": 0.6328307390213013,
+  "mean_similarity": 0.6208124756813049,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "1_14",
+   "3_24",
+   "1_5",
+   "1_0"
+  ]
+ },
+ {
+  "id": "o04",
+  "bucket": "off_corpus_medical",
+  "expected": "decline",
+  "drug": null,
+  "axis": null,
+  "top_similarity": 0.7021816372871399,
+  "mean_similarity": 0.6842799186706543,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "2_7",
+   "3_6",
+   "3_11",
+   "1_3"
+  ]
+ },
+ {
+  "id": "o05",
+  "bucket": "off_corpus_medical",
+  "expected": "decline",
+  "drug": null,
+  "axis": null,
+  "top_similarity": 0.695745587348938,
+  "mean_similarity": 0.6923656463623047,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "2_22",
+   "2_7",
+   "1_10",
+   "2_16"
+  ]
+ },
+ {
+  "id": "o06",
+  "bucket": "off_corpus_medical",
+  "expected": "decline",
+  "drug": null,
+  "axis": null,
+  "top_similarity": 0.6911584734916687,
+  "mean_similarity": 0.6751600801944733,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "3_4",
+   "3_17",
+   "3_16",
+   "3_5"
+  ]
+ },
+ {
+  "id": "o07",
+  "bucket": "off_corpus_medical",
+  "expected": "decline",
+  "drug": null,
+  "axis": null,
+  "top_similarity": 0.6240801811218262,
+  "mean_similarity": 0.6078235308329264,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "3_20",
+   "2_26",
+   "2_22",
+   "3_3"
+  ]
+ },
+ {
+  "id": "o08",
+  "bucket": "off_corpus_medical",
+  "expected": "decline",
+  "drug": null,
+  "axis": null,
+  "top_similarity": 0.6417827010154724,
+  "mean_similarity": 0.6352338790893555,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "3_22",
+   "1_16",
+   "3_11",
+   "1_12"
+  ]
+ },
+ {
+  "id": "o09",
+  "bucket": "off_corpus_medical",
+  "expected": "decline",
+  "drug": null,
+  "axis": null,
+  "top_similarity": 0.6320271492004395,
+  "mean_similarity": 0.6253515034914017,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "3_9",
+   "3_10",
+   "3_11",
+   "1_2"
+  ]
+ },
+ {
+  "id": "d01",
+  "bucket": "off_domain",
+  "expected": "decline",
+  "drug": null,
+  "axis": null,
+  "top_similarity": 0.48059117794036865,
+  "mean_similarity": 0.46979720890522003,
+  "lexical_support": false,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "3_3",
+   "3_15",
+   "3_1",
+   "3_11"
+  ]
+ },
+ {
+  "id": "d02",
+  "bucket": "off_domain",
+  "expected": "decline",
+  "drug": null,
+  "axis": null,
+  "top_similarity": 0.4861336946487427,
+  "mean_similarity": 0.4746822565793991,
+  "lexical_support": false,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "3_7",
+   "3_8",
+   "3_10",
+   "3_1"
+  ]
+ },
+ {
+  "id": "d03",
+  "bucket": "off_domain",
+  "expected": "decline",
+  "drug": null,
+  "axis": null,
+  "top_similarity": 0.42447322607040405,
+  "mean_similarity": 0.41823479533195496,
+  "lexical_support": false,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "weak_unsupported",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "2_3",
+   "2_1",
+   "3_3",
+   "2_25"
+  ]
+ },
+ {
+  "id": "d04",
+  "bucket": "off_domain",
+  "expected": "decline",
+  "drug": null,
+  "axis": null,
+  "top_similarity": 0.5472227931022644,
+  "mean_similarity": 0.5249632398287455,
+  "lexical_support": true,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "3_20",
+   "2_23",
+   "3_3",
+   "3_15"
+  ]
+ },
+ {
+  "id": "d05",
+  "bucket": "off_domain",
+  "expected": "decline",
+  "drug": null,
+  "axis": null,
+  "top_similarity": 0.5153480172157288,
+  "mean_similarity": 0.5023071616888046,
+  "lexical_support": false,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "3_15",
+   "1_7",
+   "2_0",
+   "1_5"
+  ]
+ },
+ {
+  "id": "d06",
+  "bucket": "off_domain",
+  "expected": "decline",
+  "drug": null,
+  "axis": null,
+  "top_similarity": 0.5556401014328003,
+  "mean_similarity": 0.5403278470039368,
+  "lexical_support": false,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "2_7",
+   "2_2",
+   "2_1",
+   "3_3"
+  ]
+ },
+ {
+  "id": "d07",
+  "bucket": "off_domain",
+  "expected": "decline",
+  "drug": null,
+  "axis": null,
+  "top_similarity": 0.4396936893463135,
+  "mean_similarity": 0.42808717489242554,
+  "lexical_support": false,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "weak_unsupported",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "3_3",
+   "3_18",
+   "3_14",
+   "3_1"
+  ]
+ },
+ {
+  "id": "d08",
+  "bucket": "off_domain",
+  "expected": "decline",
+  "drug": null,
+  "axis": null,
+  "top_similarity": 0.5225570797920227,
+  "mean_similarity": 0.5082040429115295,
+  "lexical_support": false,
+  "corpus_empty": false,
+  "gate_reason_at_defaults": "ok",
+  "sentinel_fired": true,
+  "answer": "",
+  "retrieved": [
+   "1_2",
+   "2_3",
+   "3_6",
+   "3_11"
+  ]
+ }
+]
