@@ -17,6 +17,14 @@ RESULTS = HERE / "eval_results.md"
 
 GRID = [round(0.20 + i * 0.05, 2) for i in range(16)]  # 0.20 .. 0.95
 
+# The hand-picked values this phase existed to replace. Pinned as a literal
+# rather than read from GateConfig(): once the measured values are adopted,
+# reading live config would make the baseline section tautologically equal to
+# the chosen point, deleting the one comparison that shows what the sweep
+# bought. It would also make this file's output depend on mutable production
+# config rather than purely on signals.json, so it would stop reproducing.
+PLACEHOLDERS = GateConfig(tau_abstain=0.30, tau_strong=0.45)
+
 
 def sweep(records: list[dict]) -> list[OperatingPoint]:
     return [
@@ -47,7 +55,27 @@ def main() -> None:
     records = json.loads(SIGNALS.read_text())
     points = sweep(records)
     best = choose_best(points)
-    default = score_point(records, GateConfig())
+    default = score_point(records, PLACEHOLDERS)
+
+    # How many questions the chosen tau_strong actually rules on. The middle
+    # band only fires for a question that clears tau_abstain WITHOUT lexical
+    # support; if nothing in the set does that, tau_strong is unconstrained by
+    # this data and reporting it as "chosen" without saying so would overstate
+    # what was measured.
+    in_middle_band = sum(
+        1 for r in records
+        if r["top_similarity"] >= best.tau_abstain and not r["lexical_support"]
+    )
+    tau_strong_note = (
+        f"- `tau_strong` is **not constrained by this corpus**: {in_middle_band} of {len(records)} "
+        "questions clear `tau_abstain` without lexical support, so the middle band never rules on "
+        "one. Every `tau_strong` above the chosen `tau_abstain` scores identically (see the ties in "
+        "the table above); the lowest was taken. It needs re-measuring against a corpus where the "
+        "vector and lexical legs disagree more often."
+        if in_middle_band == 0 else
+        f"- `tau_strong` rules on {in_middle_band} of {len(records)} questions — those clearing "
+        "`tau_abstain` with no lexical support."
+    )
 
     top = sorted(points, key=lambda p: (p.false_declines, -p.recall, -p.llm_calls_avoided))[:12]
     rows = ["| tau_abstain | tau_strong | precision | recall | false declines | LLM calls avoided | stage1 | stage2 |",
@@ -73,12 +101,16 @@ Near-miss questions target `(drug, axis)` pairs measured absent from the shipped
 
 {bucket_table(records)}
 
-## Shipped defaults (tau_abstain={default.tau_abstain}, tau_strong={default.tau_strong})
+## Baseline — the placeholders this sweep replaced (tau_abstain={default.tau_abstain}, tau_strong={default.tau_strong})
 
 - precision {default.precision:.2f}, recall {default.recall:.2f}
 - false declines on answerable questions: **{default.false_declines}**
 - LLM calls avoided by stage 1: **{default.llm_calls_avoided}** of {default.should_decline} declines
 - near-misses caught: stage 1 {default.near_miss_stage1}, stage 2 {default.near_miss_stage2}
+
+The headline finding is that middle row: the hand-picked thresholds were low enough that stage 1
+declined almost nothing, so nearly every off-topic question still cost a full LLM call. Both stages
+were already correct — the gate was just not earning its place in front of the model.
 
 ## Best operating points
 
@@ -97,6 +129,7 @@ Ranked by: zero false declines first, then recall, then LLM calls avoided (spec 
 
 ## Caveats
 
+{tau_strong_note}
 - Three drug labels from one document type is a narrow basis. These thresholds are calibrated for
   this corpus and should be re-measured against any substantially different one.
 - {len(records)} questions is a small sample; precision and recall move meaningfully with a handful

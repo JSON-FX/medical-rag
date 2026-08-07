@@ -30,9 +30,12 @@ class RetrievalConfig:
 
 @dataclass(frozen=True)
 class GateConfig:
-    # PLACEHOLDERS until the Phase 3 eval sweep. See spec 6.5 and 17.
-    tau_abstain: float = 0.30
-    tau_strong: float = 0.45
+    # Measured by the Phase 3 eval sweep over 40 labelled questions against a
+    # three-label FDA corpus. See evals/eval_results.md for the curve these were
+    # chosen from and the caveats on how far they generalise — in particular,
+    # tau_strong is not constrained by that corpus.
+    tau_abstain: float = 0.70
+    tau_strong: float = 0.75
 
 
 @dataclass(frozen=True)
@@ -68,7 +71,7 @@ def load_config(env: Mapping[str, str] | None = None) -> RagConfig:
         retrieval=RetrievalConfig(
             per_leg=_i("RETRIEVE_N", 10), top_k=_i("TOP_K", 4), rrf_k=_i("RRF_K", 60)
         ),
-        gate=GateConfig(tau_abstain=_f("TAU_ABSTAIN", 0.30), tau_strong=_f("TAU_STRONG", 0.45)),
+        gate=GateConfig(tau_abstain=_f("TAU_ABSTAIN", 0.70), tau_strong=_f("TAU_STRONG", 0.75)),
         max_upload_mb=_i("MAX_UPLOAD_MB", 15),
         history_messages=_i("HISTORY_MESSAGES", 4),
     )

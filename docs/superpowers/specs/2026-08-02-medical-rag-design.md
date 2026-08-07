@@ -581,7 +581,7 @@ All tunables in `rag/config.py` as frozen dataclasses, overridable by environmen
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | 1000 / 150 | PRD §10 |
 | `RETRIEVE_N` / `TOP_K` | 10 per leg / 4 fused | §6.2 |
 | `RRF_K` | 60 | conventional |
-| `TAU_ABSTAIN` / `TAU_STRONG` | 0.30 / 0.45 | **placeholders until §13 runs** |
+| `TAU_ABSTAIN` / `TAU_STRONG` | 0.70 / 0.75 | measured — `evals/eval_results.md` |
 | `MAX_UPLOAD_MB` | 15 | PRD §9 |
 | `HISTORY_MESSAGES` | 4 | PRD §10 |
 
@@ -632,13 +632,13 @@ Unchanged from the PRD: stack, non-goals, chunk sizing, `top_k=4`, history cap, 
 
 **Carried from the PRD:**
 
-- **Thresholds are unmeasured.** Explicitly placeholders until Phase 3. §13 is the mitigation, not a claim that the problem is solved.
+- **Thresholds are measured, on a narrow corpus.** Phase 3 replaced the placeholders with `0.70 / 0.75`, chosen from 120 operating points over 40 labelled questions with zero false declines (`evals/eval_results.md`). The residual risk moved rather than closed: three FDA labels of one document type is a thin basis, and `tau_strong` was never binding on that corpus, so it rests on no evidence at all. Re-measure against any substantially different corpus.
 - **No single layer is airtight.** Two stages reduce failure rate; they do not eliminate it. An 8B model can still stray. Worth stating plainly in an interview rather than overselling.
 
 **New to this design:**
 
 - **The sentinel depends on instruction-following.** An 8B model may occasionally answer instead of emitting `INSUFFICIENT_CONTEXT`. Stage 1 remains the stronger layer; Stage 2 is defence in depth. The eval harness measures how often Stage 2 fires correctly, so the claim stays evidence-backed.
-- **`lexical_support` is a coarse boolean.** A graded lexical-overlap score would likely be better. Deferred until the sweep shows whether the boolean is the limiting factor — no point tuning a signal that isn't binding.
+- **`lexical_support` is a coarse boolean, and the sweep showed it is not binding.** Every one of the 40 questions that cleared `tau_abstain` also had lexical support, so the middle band never ruled on a single case and a graded score would have changed nothing. That is a fact about this corpus — FTS5 finds *some* term overlap for almost any medically-phrased question against medical text — not a general finding. Still deferred, now for a measured reason.
 - **Chroma's configuration API has shifted across versions.** Mitigated by pinning and a startup assertion.
 - **FTS5 compilation is assumed, not guaranteed.** Phase 0 checks; `rank_bm25` is the fallback behind an identical interface.
 - **RRF discards score magnitude**, which is what feeds `top_similarity`. The gate therefore reads similarity from the *vector leg directly*, not from fused output — a subtle ordering constraint in the query path worth calling out during implementation.

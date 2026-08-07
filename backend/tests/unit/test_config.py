@@ -12,8 +12,10 @@ def test_defaults_match_spec():
     assert cfg.retrieval.per_leg == 10
     assert cfg.retrieval.top_k == 4
     assert cfg.retrieval.rrf_k == 60
-    assert cfg.gate.tau_abstain == 0.30
-    assert cfg.gate.tau_strong == 0.45
+    # Measured by the Phase 3 eval sweep — see evals/eval_results.md. These
+    # assertions are what stops the thresholds drifting silently.
+    assert cfg.gate.tau_abstain == 0.70
+    assert cfg.gate.tau_strong == 0.75
     assert cfg.max_upload_mb == 15
     assert cfg.history_messages == 4
 

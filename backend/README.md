@@ -29,9 +29,18 @@ know" has to be a normal, common outcome rather than a failure mode. That is enf
 Every gate decision (`was_declined`, `decline_reason`, and the raw `gate_signals`) is persisted on
 the `ChatMessage` row and visible in `/admin/`.
 
-The gate's two thresholds are explicit placeholders (`rag/config.py`) pending a labelled Phase 3 eval
-sweep; `mean_similarity` is computed and recorded on every turn but deliberately not wired into the
-gate decision yet, for the same reason.
+The gate's two thresholds (`rag/config.py`) are measured, not guessed: `evals/` builds a corpus from
+three real FDA labels, asks 40 labelled questions, and sweeps 120 threshold pairs over the cached
+signals — see [`evals/eval_results.md`](evals/eval_results.md) for the curve and its caveats. The
+sweep's own finding was that the previous hand-picked values left stage 1 declining almost nothing,
+so 24 of 26 off-topic questions still cost a full LLM call. `mean_similarity` is computed and
+recorded on every turn but still deliberately not wired into the gate decision.
+
+Re-run the sweep without Ollama (`signals.json` is committed):
+
+```
+uv run python -m evals.sweep
+```
 
 ## Scope — read this before pointing it at anything real
 
