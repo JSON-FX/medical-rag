@@ -17,6 +17,11 @@ would in fact have refused. Retrieval therefore runs with an open gate
 gate's verdict is computed afterwards from the same signals. That is sound for
 the same reason the whole sweep is: the signals are a property of the question
 and the corpus, not of the thresholds (spec 4.1).
+
+"The corpus" has to mean the eval corpus and nothing else. Chroma is sandboxed
+to a temp dir, but the lexical leg reads the shared FTS table, so this refuses
+to start against a database that already holds documents — see
+`require_empty_database`.
 """
 from __future__ import annotations
 
@@ -50,6 +55,28 @@ QUESTIONS = HERE / "questions.yaml"
 SIGNALS = HERE / "signals.json"
 
 OPEN_GATE = GateConfig(tau_abstain=0.0, tau_strong=0.0)
+
+DIRTY_DATABASE = """\
+refusing to run: {n} document(s) already exist in the database.
+
+Chroma is sandboxed to a temp dir for this pass, but the lexical leg is not:
+chat/lexical_search.py queries the chunk_fts table in the shared db.sqlite3,
+which holds the chunks of everything ever uploaded through /documents. Those
+chunks would match eval questions, enter RRF fusion, set `lexical_support`, and
+be hydrated into the LLM's context — so the signals this pass exists to measure
+would describe your own corpus as much as the eval corpus, and nothing in the
+output would say so.
+
+Delete the existing documents first (the Documents page, or `manage.py shell`),
+or point DJANGO_SETTINGS_MODULE at a scratch database, then re-run.\
+"""
+
+
+def require_empty_database() -> None:
+    """The eval corpus must be the ONLY corpus, or the measurement is meaningless."""
+    existing = Document.objects.count()
+    if existing:
+        raise SystemExit(DIRTY_DATABASE.format(n=existing))
 
 
 def ingest_corpus(store, embedder, cfg) -> tuple[int, list[int]]:
@@ -102,6 +129,9 @@ def _signals_from(payload: dict, question_id: str) -> GateSignals:
 
 
 def main() -> None:
+    # Before anything expensive, and before anything is written.
+    require_empty_database()
+
     cfg = load_config()
     # Retrieval must hydrate chunks for every question, including ones the
     # shipped gate would refuse — see the module docstring.
