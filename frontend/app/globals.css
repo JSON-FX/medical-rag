@@ -128,3 +128,65 @@
     @apply font-sans;
   }
 }
+/* ---------------------------------------------------------------------------
+   Clinical palette. Overrides shadcn's neutral defaults rather than replacing
+   the token contract, so every ui/ component keeps working.
+
+   Clinical blue over the AI-purple/pink gradient that has become the default
+   for chat interfaces: this app answers medical questions, and a colour scheme
+   that reads as "generative toy" undercuts the one thing it is trying to earn.
+   Evidence and decline surfaces get their own semantic tokens so a refusal is
+   never styled as an error.
+--------------------------------------------------------------------------- */
+:root {
+  --primary: oklch(0.55 0.13 233);          /* clinical blue #0284C7 */
+  --primary-foreground: oklch(0.99 0 0);
+  --ring: oklch(0.55 0.13 233);
+  --accent: oklch(0.96 0.02 233);
+  --accent-foreground: oklch(0.35 0.09 233);
+  --muted: oklch(0.97 0.005 233);
+  --muted-foreground: oklch(0.50 0.02 233);
+  --border: oklch(0.91 0.012 233);
+  --input: oklch(0.91 0.012 233);
+  --sidebar: oklch(0.985 0.004 233);
+  --sidebar-border: oklch(0.91 0.012 233);
+  --sidebar-primary: oklch(0.55 0.13 233);
+  --sidebar-accent: oklch(0.95 0.02 233);
+  --sidebar-accent-foreground: oklch(0.35 0.09 233);
+
+  /* A decline is the system working, so it is neutral and explanatory —
+     never the destructive red reserved for actual failures. */
+  --decline: oklch(0.97 0.006 233);
+  --decline-foreground: oklch(0.42 0.02 233);
+  --decline-border: oklch(0.86 0.02 233);
+  --evidence-highlight: oklch(0.93 0.05 233);
+}
+
+.dark {
+  --primary: oklch(0.68 0.12 233);
+  --primary-foreground: oklch(0.16 0.02 233);
+  --ring: oklch(0.68 0.12 233);
+  --accent: oklch(0.28 0.04 233);
+  --accent-foreground: oklch(0.92 0.02 233);
+  --muted: oklch(0.26 0.02 233);
+  --muted-foreground: oklch(0.72 0.02 233);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 14%);
+  --sidebar: oklch(0.19 0.015 233);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-primary: oklch(0.68 0.12 233);
+  --sidebar-accent: oklch(0.28 0.04 233);
+  --sidebar-accent-foreground: oklch(0.92 0.02 233);
+
+  --decline: oklch(0.24 0.015 233);
+  --decline-foreground: oklch(0.80 0.02 233);
+  --decline-border: oklch(1 0 0 / 14%);
+  --evidence-highlight: oklch(0.32 0.06 233);
+}
+
+@theme inline {
+  --color-decline: var(--decline);
+  --color-decline-foreground: var(--decline-foreground);
+  --color-decline-border: var(--decline-border);
+  --color-evidence-highlight: var(--evidence-highlight);
+}

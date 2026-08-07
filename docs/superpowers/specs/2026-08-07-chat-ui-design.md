@@ -130,14 +130,30 @@ One typed function per endpoint: `getHealth`, `listDocuments`, `uploadDocument`,
 
 | Component | Responsibility |
 |---|---|
-| `DisclaimerBanner` | Persistent, in `layout.tsx`. PRD §11 wording, verbatim |
-| `HealthBanner` | `/api/health/` on mount; distinguishes the three failure modes |
-| `ChatWindow` | Owns `useReducer(chatReducer)`, drives `streamChat` |
-| `MessageList` / `MessageBubble` | Transcript; assistant bubbles stream in place |
-| `SourceChips` | Title + page per citation, snippet on hover |
-| `DeclineCard` | Distinct treatment for a refusal — not styled as an error |
+| `AppShell` | Nav rail + `StatusBar`, wrapping every page |
+| `StatusBar` | Disclaimer and health in one line; re-checks on navigation |
+| `ChatWindow` | Owns `useReducer(chatReducer)`, drives `streamChat`, holds evidence selection |
+| `MessageBubble` | One turn, dispatching to answer / decline / error treatments |
+| `AnswerText` | Parses `[n]` markers into buttons that select a source |
+| `EvidencePanel` | The passages behind the selected answer, always visible |
 | `DocumentUploader` | PDF-only, 15 MB, real pending state |
 | `DocumentTable` | Title, status, pages, chunks, delete |
+
+Superseded by the Clinical Workbench redesign: `DisclaimerBanner` and `HealthBanner` merged into
+`StatusBar`; `SourceChips` and `DeclineCard` folded into `EvidencePanel` and `MessageBubble`;
+`MessageList` collapsed into `ChatWindow`.
+
+### 5.0 Why the evidence is a panel, not a tooltip
+
+Every answer is supposed to trace back to retrieved text, and the first build put that text in a
+`title` attribute — technically present, practically invisible. A claim nobody can check is
+indistinguishable from a claim that is merely asserted, which is the failure this whole system is
+built to avoid. The passages now sit beside the answer, and each `[n]` in the text selects one.
+
+That mapping is only sound because `format_context` numbers chunks from 1 in the same order
+`_sources_payload` serialises them, so `[n]` is always `sources[n-1]`. A marker past the end of the
+list renders as plain text rather than a dead button — small models do invent citation numbers, and
+an affordance that does nothing is worse than none.
 
 ### 5.1 Declines are not errors
 

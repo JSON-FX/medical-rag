@@ -1,8 +1,24 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import DisclaimerBanner from "@/components/DisclaimerBanner";
-import HealthBanner from "@/components/HealthBanner";
+import { Figtree, Noto_Sans } from "next/font/google";
+
+import AppShell from "@/components/AppShell";
 import "./globals.css";
+
+// next/font downloads these at BUILD time and self-hosts the files. A
+// <link> to fonts.googleapis.com would make every page load reach out to
+// Google, which contradicts the one promise this app makes: nothing about
+// your documents leaves the machine.
+const figtree = Figtree({
+  subsets: ["latin"],
+  variable: "--font-heading",
+  display: "swap",
+});
+
+const notoSans = Noto_Sans({
+  subsets: ["latin"],
+  variable: "--font-body",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Medical RAG",
@@ -11,15 +27,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className="min-h-screen bg-background text-foreground antialiased">
-        <DisclaimerBanner />
-        <HealthBanner />
-        <nav className="flex gap-4 border-b px-4 py-3 text-sm">
-          <Link href="/" className="font-medium hover:underline">Chat</Link>
-          <Link href="/documents" className="font-medium hover:underline">Documents</Link>
-        </nav>
-        <main className="mx-auto w-full max-w-3xl px-4 py-6">{children}</main>
+    <html lang="en" className={`${figtree.variable} ${notoSans.variable}`}>
+      <body className="min-h-dvh bg-background font-[family-name:var(--font-body)] text-foreground antialiased">
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );
