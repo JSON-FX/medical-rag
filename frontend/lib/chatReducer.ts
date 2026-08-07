@@ -9,6 +9,12 @@ export interface Turn {
   sources: Source[];
   declineReason: string | null;
   errorCode: string | null;
+  /**
+   * A recovery sentence written for this specific failure — the server's own
+   * error body, or the transport diagnosis the UI made. Null means fall back to
+   * the generic copy keyed off `errorCode`.
+   */
+  errorMessage: string | null;
   truncated: boolean;
   done: boolean;
 }
@@ -22,9 +28,21 @@ export interface ChatState {
 export type ChatAction =
   | { type: "ask"; question: string }
   | { type: "frame"; frame: Frame }
-  // fetch rejected before any frame arrived — Django itself unreachable, as
-  // distinct from an `error` frame, which means Django is up and Ollama is not.
+  // The stream did not finish cleanly: either fetch rejected, or the body ended
+  // without a terminal frame. Distinct from an `error` frame, which means Django
+  // is up and told us what went wrong.
   | { type: "failed"; message: string };
+
+/**
+ * Does this frame end the turn?
+ *
+ * ChatWindow needs this to tell a stream that finished from one that was cut
+ * off, and it must agree exactly with which cases below set `done: true` — so
+ * the two live next to each other rather than being restated by the caller.
+ */
+export function isTerminalFrame(frame: Frame): boolean {
+  return frame.type === "done" || frame.type === "error";
+}
 
 export const initialChatState: ChatState = {
   sessionId: null,
@@ -40,6 +58,7 @@ function userTurn(text: string): Turn {
     sources: [],
     declineReason: null,
     errorCode: null,
+    errorMessage: null,
     truncated: false,
     done: true,
   };
@@ -53,6 +72,7 @@ function pendingTurn(): Turn {
     sources: [],
     declineReason: null,
     errorCode: null,
+    errorMessage: null,
     truncated: false,
     done: false,
   };
@@ -76,11 +96,15 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   }
 
   if (action.type === "failed") {
+    // `text` is deliberately left alone. Whatever streamed before the break is
+    // real model output and the user watched it arrive; discarding it would
+    // make a cut-off answer indistinguishable from one that never started.
     return {
       ...patchLast(state, (turn) => ({
         ...turn,
         kind: "error",
         errorCode: "transport",
+        errorMessage: action.message,
         done: true,
       })),
       streaming: false,
@@ -124,10 +148,19 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
 
     case "error":
-      return patchLast(state, (turn) => ({
-        ...turn,
-        kind: "error",
-        errorCode: frame.code,
-      }));
+      // Terminal in its own right. The backend normally sends `done` straight
+      // after (chat/views.py), but if the connection drops in between, waiting
+      // for it would leave the composer disabled with nothing left to arrive.
+      // `errorMessage` stays null: the frame's own message is a diagnostic
+      // string, and `code` maps to recovery copy written for a user (copy.ts).
+      return {
+        ...patchLast(state, (turn) => ({
+          ...turn,
+          kind: "error",
+          errorCode: frame.code,
+          done: true,
+        })),
+        streaming: false,
+      };
   }
 }

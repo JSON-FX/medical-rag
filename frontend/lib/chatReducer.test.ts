@@ -1,6 +1,12 @@
 import { describe, expect, test } from "vitest";
 
-import { chatReducer, initialChatState, type ChatAction, type ChatState } from "./chatReducer";
+import {
+  chatReducer,
+  initialChatState,
+  isTerminalFrame,
+  type ChatAction,
+  type ChatState,
+} from "./chatReducer";
 import type { Frame, Source } from "./types";
 
 const SOURCE: Source = {
@@ -153,6 +159,18 @@ describe("errors", () => {
     expect(state.turns[1]).toMatchObject({ kind: "error", errorCode: "ollama_unavailable" });
   });
 
+  test("an error frame on its own ends the turn and stops streaming", () => {
+    // The backend usually sends `done` right after an error frame, but if the
+    // connection drops in between there is nothing left to wait for. Without
+    // this the composer stays disabled forever.
+    const state = run([
+      ask("q"),
+      frame({ type: "error", code: "ollama_unavailable", message: "connection refused" }),
+    ]);
+    expect(state.turns[1].done).toBe(true);
+    expect(state.streaming).toBe(false);
+  });
+
   test("a transport failure with no frames at all is an error turn", () => {
     const state = run([ask("q"), { type: "failed", message: "Failed to fetch" }]);
     expect(state.turns[1]).toMatchObject({ kind: "error", done: true });
@@ -186,6 +204,59 @@ describe("errors", () => {
     ]);
     expect(state.turns[1]).toMatchObject({ kind: "error", done: true });
     expect(state.streaming).toBe(false);
+  });
+});
+
+describe("a stream that ends without a done frame", () => {
+  // Under `manage.py runserver` a body truncated by a generator raising is
+  // byte-identical to a complete one at the fetch layer, so ChatWindow detects
+  // it after the loop and dispatches `failed`. These pin what that must leave
+  // behind: a finished turn, an enabled composer, and the text already shown.
+
+  test("finishes the turn and re-enables the composer", () => {
+    const state = run([
+      ask("q"),
+      frame({ type: "sources", items: [SOURCE] }),
+      frame({ type: "token", text: "Start with 500 mg" }),
+      { type: "failed", message: "The connection dropped" },
+    ]);
+    expect(state.turns[1]).toMatchObject({ kind: "error", done: true });
+    expect(state.streaming).toBe(false);
+  });
+
+  test("retains the text that already streamed", () => {
+    const state = run([
+      ask("q"),
+      frame({ type: "sources", items: [SOURCE] }),
+      frame({ type: "token", text: "Start with " }),
+      frame({ type: "token", text: "500 mg" }),
+      { type: "failed", message: "The connection dropped" },
+    ]);
+    expect(state.turns[1].text).toBe("Start with 500 mg");
+    expect(state.turns[1].sources).toEqual([SOURCE]);
+  });
+
+  test("keeps the failure message for display", () => {
+    // The server's error body is written for a user; falling back to generic
+    // copy would throw away the one sentence that says what actually happened.
+    const state = run([ask("q"), { type: "failed", message: "Upload a document first." }]);
+    expect(state.turns[1].errorMessage).toBe("Upload a document first.");
+  });
+
+  test("isTerminalFrame agrees with the frames that set done", () => {
+    expect(isTerminalFrame({ type: "token", text: "x" })).toBe(false);
+    expect(isTerminalFrame({ type: "sources", items: [SOURCE] })).toBe(false);
+    expect(isTerminalFrame({ type: "meta", session_id: "s-1" })).toBe(false);
+    expect(isTerminalFrame({ type: "error", code: "x", message: "y" })).toBe(true);
+    expect(
+      isTerminalFrame({
+        type: "done",
+        message_id: 1,
+        was_declined: false,
+        decline_reason: null,
+        truncated: false,
+      }),
+    ).toBe(true);
   });
 });
 

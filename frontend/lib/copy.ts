@@ -21,6 +21,18 @@ export const ERROR_RECOVERY: Record<string, string> = {
 
 export const FALLBACK_ERROR_RECOVERY = "Something went wrong reaching the backend.";
 
+/**
+ * The stream ended without a terminal frame — the generator raised mid-answer
+ * and the body simply stopped. There is no status code and no error frame to
+ * key off, so this is the whole diagnosis the user gets.
+ */
+export const STREAM_CUT_OFF =
+  "The connection dropped before the answer finished. Ask again to retry — nothing above was lost.";
+
+/** fetch itself rejected, so the server never got to say anything usable. */
+export const TRANSPORT_FAILURE =
+  "Couldn't reach the backend. Check that Django is running, then ask again.";
+
 export function declineLabel(reason: string | null): string {
   if (!reason) return FALLBACK_DECLINE_LABEL;
   return DECLINE_LABELS[reason] ?? FALLBACK_DECLINE_LABEL;
