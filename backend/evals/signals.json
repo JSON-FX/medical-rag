@@ -11,7 +11,7 @@
   "corpus_empty": false,
   "gate_reason_at_defaults": "ok",
   "sentinel_fired": false,
-  "answer": "[1, 2] The recommended starting doses for adults are either 500 mg orally twice a day or 850 mg once a day, given with meals. [1, p. 1; 2, pp. 1-2]",
+  "answer": "The recommended starting dose for adult patients is either 500 mg orally twice a day or 850 mg once a day, given with meals [1, 2].",
   "retrieved": [
    "1_1",
    "1_2",
@@ -31,7 +31,7 @@
   "corpus_empty": false,
   "gate_reason_at_defaults": "ok",
   "sentinel_fired": false,
-  "answer": "According to [1] and [3], the maximum daily dose of metformin hydrochloride tablets is 2550 mg per day, given in divided doses. Doses above 2000 mg may be better tolerated when taken 3 times a day with meals ([1]).\n\nSources:\n[1]\n[3]",
+  "answer": "The maximum daily dose of metformin is 2550 mg per day, given in divided doses [1].",
   "retrieved": [
    "1_3",
    "1_1",
@@ -51,7 +51,7 @@
   "corpus_empty": false,
   "gate_reason_at_defaults": "ok",
   "sentinel_fired": false,
-  "answer": "Metformin is contraindicated in patients with: [1] Severe renal impairment (eGFR below 30 mL/min/1.73 m^2) and Hypersensitivity to metformin. [1] Acute or chronic metabolic acidosis, including diabetic ketoacidosis, with or without coma.\n\nAdditionally, initiation of metformin in patients with an eGFR between 30 to 45 mL/minute/1.73 m^2 is not recommended. [2]\n\n[1] (metformin.pdf, p. 4)\n[2] (metfor",
+  "answer": "Metformin hydrochloride tablets are contraindicated in patients with:\n\n* Severe renal impairment (eGFR below 30 mL/min/1.73 m2) [see Warnings and Precautions (5.1)].\n* Hypersensitivity to metformin.\n* Acute or chronic metabolic acidosis, including diabetic ketoacidosis, with or without coma.\n\n[1] (metformin.pdf, p. 4), [2] (metformin.pdf, p. 3)",
   "retrieved": [
    "1_6",
    "1_4",
@@ -71,7 +71,7 @@
   "corpus_empty": false,
   "gate_reason_at_defaults": "ok",
   "sentinel_fired": false,
-  "answer": "Metformin is contraindicated in patients with an estimated glomerular filtration rate (eGFR) below 30 mL/minute/1.73 m2 [1, 2, 3].",
+  "answer": "According to [1] and [2], metformin is contraindicated in patients with an estimated glomerular filtration rate (eGFR) below 30 mL/minute/1.73 m^2.",
   "retrieved": [
    "1_4",
    "1_6",
@@ -91,7 +91,7 @@
   "corpus_empty": false,
   "gate_reason_at_defaults": "ok",
   "sentinel_fired": false,
-  "answer": "According to [2] and [3], the dose can be increased:\n\n* In adults: \"Increase the dose in increments of 500 mg weekly or 850 mg every 2 weeks\" ([3])\n* In pediatric patients 10 years of age and older: \"Increase dosage in increments of 500 mg weekly up to a maximum of 2000 mg per day, given in divided doses twice daily\" ([2])",
+  "answer": "According to [1] and [2], the dosage of metformin hydrochloride tablets should be increased in increments of:\n\n* 500 mg weekly (for adults, [2.1])\n* 500 mg weekly (for pediatric patients, [2.2])\n\nNote that for pediatric patients, the maximum dose is 2000 mg per day, given in divided doses twice daily.",
   "retrieved": [
    "1_1",
    "1_3",
@@ -111,7 +111,7 @@
   "corpus_empty": false,
   "gate_reason_at_defaults": "ok",
   "sentinel_fired": false,
-  "answer": "The initial dose of atenolol for hypertension is 50 mg given as one tablet a day either alone or added to diuretic therapy [1].",
+  "answer": "[1] The initial dose of atenolol for hypertension is 50 mg given as one tablet a day either alone or added to diuretic therapy.",
   "retrieved": [
    "2_5",
    "2_6",
@@ -131,7 +131,7 @@
   "corpus_empty": false,
   "gate_reason_at_defaults": "ok",
   "sentinel_fired": false,
-  "answer": "According to [2], the full effect of this dose will usually be seen within one to two weeks. If an optimal response is not achieved, the dosage should be increased to atenolol 100 mg given as one tablet a day. Increasing the dosage beyond 100 mg a day is unlikely to produce any further benefit.\n\nAlso, [2] states: \"Twenty-four hour control with once daily dosing is achieved by giving doses larger t",
+  "answer": "The maximum useful daily dose of atenolol for hypertension is 100 mg a day, as stated in [2] (atenolol.pdf, p. 4): \"If an optimal response is not achieved within one week, the dosage should be increased to atenolol 100 mg given as one tablet a day.\" Additionally, it notes that increasing the dosage beyond 100 mg a day is unlikely to produce any further benefit.",
   "retrieved": [
    "2_13",
    "2_6",
@@ -151,7 +151,7 @@
   "corpus_empty": false,
   "gate_reason_at_defaults": "ok",
   "sentinel_fired": false,
-  "answer": "According to [1] and [2], atenolol is contraindicated in the following conditions:\n\n* Sinus bradycardia\n* Heart block greater than first degree\n* Cardiogenic shock\n* Overt cardiac failure\n* Hypersensitivity to atenolol or any of its components\n\nAdditionally, according to [3] and [4], patients with a history of I.V. beta-blocker use may require special consideration before initiating atenolol thera",
+  "answer": "According to [1], atenolol tablets are contraindicated in the following conditions:\n\n* Sinus bradycardia\n* Heart block greater than first degree\n* Cardiogenic shock\n* Overt cardiac failure\n\nAdditionally, according to [2] and [4], atenolol is also contraindicated in patients with a history of hypersensitivity to atenolol or any of its components.\n\n[1], [2], and [4]",
   "retrieved": [
    "2_15",
    "2_14",
@@ -171,7 +171,7 @@
   "corpus_empty": false,
   "gate_reason_at_defaults": "ok",
   "sentinel_fired": false,
-  "answer": "According to [1], atenolol tablets are indicated for:\n\n* The treatment of hypertension (to lower blood pressure)\n* Angina pectoris (long-term management)\n* Acute myocardial infarction (management of hemodynamically stable patients)\n\n([1] atenolol.pdf, p. 1 and [2] atenolol.pdf, p. 3)",
+  "answer": "Hypertension [1], angina pectoris [2], and the management of hemodynamically stable patients with definite or suspected acute myocardial infarction [2]. \n\n[1] (atenolol.pdf, p. 1)\n[2] (atenolol.pdf, p. 3)",
   "retrieved": [
    "2_0",
    "2_4",
@@ -191,7 +191,7 @@
   "corpus_empty": false,
   "gate_reason_at_defaults": "ok",
   "sentinel_fired": false,
-  "answer": "750 to 1750 mg/day in divided doses every 8 to 12 hours. [1]",
+  "answer": "750 to 1750 mg/day in divided doses every 8 to 12 hours. [1] (p. 4)",
   "retrieved": [
    "3_6",
    "3_11",
@@ -211,7 +211,7 @@
   "corpus_empty": false,
   "gate_reason_at_defaults": "ok",
   "sentinel_fired": false,
-  "answer": "[1] The recommended triple therapy regimen for Helicobacter pylori (H. pylori) infection and duodenal ulcer disease with amoxicillin tablets, clarithromycin, and lansoprazole involves administering 1 gram of amoxicillin, 500 mg of clarithromycin, and 30 mg of lansoprazole twice daily (every 12 hours) for 14 days.",
+  "answer": "According to [2] and [3], the recommended adult oral dose for the amoxicillin triple therapy regimen for H. pylori infection is:\n\n* 1 gram amoxicillin, twice daily (every 12 hours)\n* 500 mg clarithromycin, twice daily (every 12 hours)\n* 30 mg lansoprazole, twice daily (every 12 hours)\n\nThis regimen is given for 14 days. [2] and [3]\n\nNote: This is the same information listed in both documents, so I",
   "retrieved": [
    "3_2",
    "3_6",
@@ -231,7 +231,7 @@
   "corpus_empty": false,
   "gate_reason_at_defaults": "ok",
   "sentinel_fired": false,
-  "answer": "Patients who have experienced a serious hypersensitivity reaction (e.g., anaphylaxis or Stevens-Johnson syndrome) to amoxicillin tablets or to other beta-lactam antibiotics [3, p. 7].",
+  "answer": "Patients who have experienced a serious hypersensitivity reaction (e.g., anaphylaxis or Stevens-Johnson syndrome) to amoxicillin tablets or to other [3].",
   "retrieved": [
    "3_16",
    "3_22",
@@ -251,7 +251,7 @@
   "corpus_empty": false,
   "gate_reason_at_defaults": "ok",
   "sentinel_fired": false,
-  "answer": "According to [1], p. 4, \"750 to 1750 mg/day in divided doses every 8 to 12 hours.\" Also, [2] and [3] mention dosing every 8-12 hours as well. Therefore, amoxicillin is given in divided doses every 8 to 12 hours.",
+  "answer": "According to the prescribing information, [1] amoxicillin should be taken at the start of a meal and the dosing frequency is as follows:\n\n* In Pediatric Patients over 3 Months of Age: every 8 to 12 hours (p. 4)\n* The upper dose for neonates and infants aged 3 months or younger: every 12 hours (p. 4)\n\nAdditionally, in the context of treating H. pylori infection, amoxicillin is given twice daily (ev",
   "retrieved": [
    "3_6",
    "3_10",
@@ -271,7 +271,7 @@
   "corpus_empty": false,
   "gate_reason_at_defaults": "ok",
   "sentinel_fired": false,
-  "answer": "According to the provided documents:\n\n* Carbonic anhydrase inhibitors (e.g. topiramate, zonisamide, acetazolamide or dichlorphenamide) may increase the risk of lactic acidosis when taken with metformin [1].\n* Alcohol can potentiate the effect of metformin on lactate metabolism [3].\n* Insulin secretagogues or insulin may increase the risk of hypoglycemia when coadministered with metformin hydrochlo",
+  "answer": "There are several clinically significant drug interactions with metformin hydrochloride tablets. \n\nThese include:\n\n* Carbonic anhydrase inhibitors: May increase the risk of lactic acidosis (Table 3 in [1])\n* Insulin secretagogues or insulin: May increase the risk of hypoglycemia ([3])\n* Certain drugs that tend to produce hyperglycemia: May lead to loss of glycemic control, and patients should be o",
   "retrieved": [
    "1_12",
    "1_11",
@@ -329,7 +329,7 @@
   "mean_similarity": 0.6726993024349213,
   "lexical_support": true,
   "corpus_empty": false,
-  "gate_reason_at_defaults": "ok",
+  "gate_reason_at_defaults": "off_domain",
   "sentinel_fired": true,
   "answer": "",
   "retrieved": [
@@ -350,8 +350,8 @@
   "lexical_support": true,
   "corpus_empty": false,
   "gate_reason_at_defaults": "ok",
-  "sentinel_fired": true,
-  "answer": "",
+  "sentinel_fired": false,
+  "answer": "There is no mention of a specific age range referred to as \"elderly\" in any of the provided documents. However, there is some general guidance on dosage adjustments for certain patient populations and conditions.\n\nAccording to [1], the dosing recommendations for amoxicillin are based on weight, with upper dose limits mentioned for pediatric patients aged less than 12 weeks (3 months) [1, p. 6].\n\nT",
   "retrieved": [
    "3_10",
    "3_22",
@@ -409,7 +409,7 @@
   "mean_similarity": 0.6826377511024475,
   "lexical_support": true,
   "corpus_empty": false,
-  "gate_reason_at_defaults": "ok",
+  "gate_reason_at_defaults": "off_domain",
   "sentinel_fired": true,
   "answer": "",
   "retrieved": [
@@ -509,7 +509,7 @@
   "mean_similarity": 0.6208124756813049,
   "lexical_support": true,
   "corpus_empty": false,
-  "gate_reason_at_defaults": "ok",
+  "gate_reason_at_defaults": "off_domain",
   "sentinel_fired": true,
   "answer": "",
   "retrieved": [
@@ -549,7 +549,7 @@
   "mean_similarity": 0.6923656463623047,
   "lexical_support": true,
   "corpus_empty": false,
-  "gate_reason_at_defaults": "ok",
+  "gate_reason_at_defaults": "off_domain",
   "sentinel_fired": true,
   "answer": "",
   "retrieved": [
@@ -569,7 +569,7 @@
   "mean_similarity": 0.6169047057628632,
   "lexical_support": true,
   "corpus_empty": false,
-  "gate_reason_at_defaults": "ok",
+  "gate_reason_at_defaults": "off_domain",
   "sentinel_fired": true,
   "answer": "",
   "retrieved": [
@@ -589,7 +589,7 @@
   "mean_similarity": 0.6078235308329264,
   "lexical_support": true,
   "corpus_empty": false,
-  "gate_reason_at_defaults": "ok",
+  "gate_reason_at_defaults": "off_domain",
   "sentinel_fired": true,
   "answer": "",
   "retrieved": [
@@ -609,7 +609,7 @@
   "mean_similarity": 0.6352338790893555,
   "lexical_support": true,
   "corpus_empty": false,
-  "gate_reason_at_defaults": "ok",
+  "gate_reason_at_defaults": "off_domain",
   "sentinel_fired": true,
   "answer": "",
   "retrieved": [
@@ -629,7 +629,7 @@
   "mean_similarity": 0.6253515034914017,
   "lexical_support": true,
   "corpus_empty": false,
-  "gate_reason_at_defaults": "ok",
+  "gate_reason_at_defaults": "off_domain",
   "sentinel_fired": true,
   "answer": "",
   "retrieved": [
@@ -649,7 +649,7 @@
   "mean_similarity": 0.46979720890522003,
   "lexical_support": false,
   "corpus_empty": false,
-  "gate_reason_at_defaults": "ok",
+  "gate_reason_at_defaults": "off_domain",
   "sentinel_fired": true,
   "answer": "",
   "retrieved": [
@@ -669,7 +669,7 @@
   "mean_similarity": 0.4746822565793991,
   "lexical_support": false,
   "corpus_empty": false,
-  "gate_reason_at_defaults": "ok",
+  "gate_reason_at_defaults": "off_domain",
   "sentinel_fired": true,
   "answer": "",
   "retrieved": [
@@ -689,7 +689,7 @@
   "mean_similarity": 0.41823479533195496,
   "lexical_support": false,
   "corpus_empty": false,
-  "gate_reason_at_defaults": "weak_unsupported",
+  "gate_reason_at_defaults": "off_domain",
   "sentinel_fired": true,
   "answer": "",
   "retrieved": [
@@ -709,7 +709,7 @@
   "mean_similarity": 0.5249632398287455,
   "lexical_support": true,
   "corpus_empty": false,
-  "gate_reason_at_defaults": "ok",
+  "gate_reason_at_defaults": "off_domain",
   "sentinel_fired": true,
   "answer": "",
   "retrieved": [
@@ -729,7 +729,7 @@
   "mean_similarity": 0.5023071616888046,
   "lexical_support": false,
   "corpus_empty": false,
-  "gate_reason_at_defaults": "ok",
+  "gate_reason_at_defaults": "off_domain",
   "sentinel_fired": true,
   "answer": "",
   "retrieved": [
@@ -749,7 +749,7 @@
   "mean_similarity": 0.5403278470039368,
   "lexical_support": false,
   "corpus_empty": false,
-  "gate_reason_at_defaults": "ok",
+  "gate_reason_at_defaults": "off_domain",
   "sentinel_fired": true,
   "answer": "",
   "retrieved": [
@@ -769,7 +769,7 @@
   "mean_similarity": 0.42808717489242554,
   "lexical_support": false,
   "corpus_empty": false,
-  "gate_reason_at_defaults": "weak_unsupported",
+  "gate_reason_at_defaults": "off_domain",
   "sentinel_fired": true,
   "answer": "",
   "retrieved": [
@@ -789,7 +789,7 @@
   "mean_similarity": 0.5082040429115295,
   "lexical_support": false,
   "corpus_empty": false,
-  "gate_reason_at_defaults": "ok",
+  "gate_reason_at_defaults": "off_domain",
   "sentinel_fired": true,
   "answer": "",
   "retrieved": [

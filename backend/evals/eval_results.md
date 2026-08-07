@@ -14,16 +14,16 @@ Near-miss questions target `(drug, axis)` pairs measured absent from the shipped
 | bucket | n | top_similarity range | lexical_support | sentinel fired |
 |---|---|---|---|---|
 | `answerable` | 14 | 0.730 – 0.850 | 14/14 | 0/14 |
-| `near_miss` | 9 | 0.712 – 0.786 | 9/9 | 9/9 |
+| `near_miss` | 9 | 0.695 – 0.775 | 9/9 | 8/9 |
 | `off_corpus_medical` | 9 | 0.624 – 0.739 | 9/9 | 9/9 |
 | `off_domain` | 8 | 0.424 – 0.556 | 1/8 | 8/8 |
 
 ## Baseline — the placeholders this sweep replaced (tau_abstain=0.3, tau_strong=0.45)
 
-- precision 1.00, recall 1.00
+- precision 1.00, recall 0.96
 - false declines on answerable questions: **0**
 - LLM calls avoided by stage 1: **2** of 26 declines
-- near-misses caught: stage 1 0, stage 2 9
+- near-misses caught: stage 1 0, stage 2 8
 
 The headline finding is that middle row: the hand-picked thresholds were low enough that stage 1
 declined almost nothing, so nearly every off-topic question still cost a full LLM call. Both stages
@@ -35,30 +35,32 @@ Ranked by: zero false declines first, then recall, then LLM calls avoided (spec 
 
 | tau_abstain | tau_strong | precision | recall | false declines | LLM calls avoided | stage1 | stage2 |
 |---|---|---|---|---|---|---|---|
-| 0.70 | 0.75 | 1.00 | 1.00 | 0 | 14 | 14 | 12 |
-| 0.70 | 0.80 | 1.00 | 1.00 | 0 | 14 | 14 | 12 |
-| 0.70 | 0.85 | 1.00 | 1.00 | 0 | 14 | 14 | 12 |
-| 0.70 | 0.90 | 1.00 | 1.00 | 0 | 14 | 14 | 12 |
-| 0.70 | 0.95 | 1.00 | 1.00 | 0 | 14 | 14 | 12 |
-| 0.65 | 0.70 | 1.00 | 1.00 | 0 | 12 | 12 | 14 |
-| 0.65 | 0.75 | 1.00 | 1.00 | 0 | 12 | 12 | 14 |
-| 0.65 | 0.80 | 1.00 | 1.00 | 0 | 12 | 12 | 14 |
-| 0.65 | 0.85 | 1.00 | 1.00 | 0 | 12 | 12 | 14 |
-| 0.65 | 0.90 | 1.00 | 1.00 | 0 | 12 | 12 | 14 |
-| 0.65 | 0.95 | 1.00 | 1.00 | 0 | 12 | 12 | 14 |
-| 0.55 | 0.60 | 1.00 | 1.00 | 0 | 8 | 8 | 18 |
+| 0.70 | 0.75 | 1.00 | 0.96 | 0 | 16 | 16 | 9 |
+| 0.70 | 0.80 | 1.00 | 0.96 | 0 | 16 | 16 | 9 |
+| 0.70 | 0.85 | 1.00 | 0.96 | 0 | 16 | 16 | 9 |
+| 0.70 | 0.90 | 1.00 | 0.96 | 0 | 16 | 16 | 9 |
+| 0.70 | 0.95 | 1.00 | 0.96 | 0 | 16 | 16 | 9 |
+| 0.65 | 0.70 | 1.00 | 0.96 | 0 | 12 | 12 | 13 |
+| 0.65 | 0.75 | 1.00 | 0.96 | 0 | 12 | 12 | 13 |
+| 0.65 | 0.80 | 1.00 | 0.96 | 0 | 12 | 12 | 13 |
+| 0.65 | 0.85 | 1.00 | 0.96 | 0 | 12 | 12 | 13 |
+| 0.65 | 0.90 | 1.00 | 0.96 | 0 | 12 | 12 | 13 |
+| 0.65 | 0.95 | 1.00 | 0.96 | 0 | 12 | 12 | 13 |
+| 0.55 | 0.60 | 1.00 | 0.96 | 0 | 8 | 8 | 17 |
 
 ## Chosen operating point
 
 **`tau_abstain = 0.7`, `tau_strong = 0.75`**
 
-- precision 1.00, recall 1.00
+- precision 1.00, recall 0.96
 - false declines on answerable questions: **0**
-- LLM calls avoided by stage 1: **14**
-- near-misses caught: stage 1 0, stage 2 9
+- LLM calls avoided by stage 1: **16**
+- near-misses caught: stage 1 2, stage 2 6
 
 ## Caveats
 
+- **1 question escaped both stages** at the chosen point: `n04` (near_miss, similarity 0.759). Stage 1 let it through and the model answered instead of emitting the sentinel.
+  Raising `tau_abstain` above 0.759 to catch `n04` at stage 1 is not available: the lowest answerable question sits at 0.730, so it would be refused too. This is the real boundary of the approach on this corpus, not a tuning oversight.
 - `tau_strong` is **not constrained by this corpus**: 0 of 40 questions clear `tau_abstain` without lexical support, so the middle band never rules on one. Every `tau_strong` above the chosen `tau_abstain` scores identically (see the ties in the table above); the lowest was taken. It needs re-measuring against a corpus where the vector and lexical legs disagree more often.
 - Three drug labels from one document type is a narrow basis. These thresholds are calibrated for
   this corpus and should be re-measured against any substantially different one.

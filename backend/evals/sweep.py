@@ -77,6 +77,45 @@ def main() -> None:
         "`tau_abstain` with no lexical support."
     )
 
+    # Questions that should decline, cleared stage 1 at the chosen threshold,
+    # and that the model then answered anyway. These are the two-stage design
+    # failing outright, so name them rather than leaving a bare recall figure.
+    escaped = [
+        r for r in records
+        if r["expected"] == "decline"
+        and not r["sentinel_fired"]
+        and r["top_similarity"] >= best.tau_abstain
+    ]
+    if escaped:
+        answerable_floor = min(
+            (r["top_similarity"] for r in records if r["expected"] == "answer"),
+            default=0.0,
+        )
+        plural = "s" if len(escaped) > 1 else ""
+        lines = [
+            f"- **{len(escaped)} question{plural} escaped both stages** at the chosen point: "
+            + ", ".join(
+                f"`{r['id']}` ({r['bucket']}, similarity {r['top_similarity']:.3f})"
+                for r in escaped
+            )
+            + f". Stage 1 let {'them' if plural else 'it'} through and the model answered "
+            "instead of emitting the sentinel."
+        ]
+        blocker = max(escaped, key=lambda r: r["top_similarity"])
+        if blocker["top_similarity"] >= answerable_floor:
+            lines.append(
+                f"  Raising `tau_abstain` above {blocker['top_similarity']:.3f} to catch "
+                f"`{blocker['id']}` at stage 1 is not available: the lowest answerable question "
+                f"sits at {answerable_floor:.3f}, so it would be refused too. This is the real "
+                "boundary of the approach on this corpus, not a tuning oversight."
+            )
+        escape_note = "\n".join(lines)
+    else:
+        escape_note = (
+            "- No question escaped both stages at the chosen point: every question that should "
+            "decline was caught by the gate or by the sentinel."
+        )
+
     top = sorted(points, key=lambda p: (p.false_declines, -p.recall, -p.llm_calls_avoided))[:12]
     rows = ["| tau_abstain | tau_strong | precision | recall | false declines | LLM calls avoided | stage1 | stage2 |",
             "|---|---|---|---|---|---|---|---|"]
@@ -129,6 +168,7 @@ Ranked by: zero false declines first, then recall, then LLM calls avoided (spec 
 
 ## Caveats
 
+{escape_note}
 {tau_strong_note}
 - Three drug labels from one document type is a narrow basis. These thresholds are calibrated for
   this corpus and should be re-measured against any substantially different one.

@@ -38,14 +38,21 @@ The gate's two thresholds were originally hand-picked. An eval harness (`backend
 them with measured values: it builds a corpus from three real FDA drug labels, asks 40 hand-labelled
 questions across four buckets, and sweeps 120 threshold pairs over cached retrieval signals.
 
-The finding that mattered wasn't the numbers — it was that precision and recall were already a
-perfect 1.00 at the old thresholds, while stage 1 was declining only 2 of 26 questions it should
-have. The other 24 off-topic questions each paid for a full LLM call before stage 2 caught them. The
-gate was correct all along; it just wasn't doing the job it exists for. Measured, that goes to 14
-of 26 with zero false declines.
+The finding that mattered wasn't the numbers — it was that stage 1 was declining only 2 of 26
+questions it should have. The other 24 off-topic questions each paid for a full LLM call before
+stage 2 caught them. The gate was correct all along; it just wasn't doing the job it exists for.
+Measured, that goes to 16 of 26 with zero false declines.
+
+Getting there took discarding a first attempt. The original absence scan matched literal phrases,
+so it missed metformin's "history of liver disease" and reported that axis absent — which made
+three of nine near-miss questions secretly answerable and inflated the result. Worse, the test
+meant to catch that re-derived absence using the same faulty function, so it could never fail. The
+scan now matches stems, and one question (`n04`) is documented as escaping both stages rather than
+being quietly relabelled.
 
 See [`backend/evals/eval_results.md`](backend/evals/eval_results.md) for the curve and its caveats —
-including the honest one, that `tau_strong` is not constrained by this corpus at all.
+including the honest ones: recall is 0.96, not 1.00, and `tau_strong` is not constrained by this
+corpus at all.
 
 ---
 
