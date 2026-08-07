@@ -62,8 +62,8 @@ test("does not split a multi-byte character across chunks", async () => {
   const bytes = encoder.encode('{"type":"token","text":"—"}\n');
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      controller.enqueue(bytes.slice(0, 20));
-      controller.enqueue(bytes.slice(20));
+      controller.enqueue(bytes.slice(0, 25));
+      controller.enqueue(bytes.slice(25));
       controller.close();
     },
   });

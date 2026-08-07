@@ -8,8 +8,8 @@ import type { Frame } from "./types";
  * trailing newline. So the buffer keeps whatever follows the final newline and
  * carries it into the next chunk.
  *
- * TextDecoder is used in streaming mode ({stream: true}) for the same reason a
- * character-level one: a multi-byte character can straddle a chunk boundary,
+ * TextDecoder is used in streaming mode ({stream: true}) for the same reason the
+ * buffer keeps a partial line: a multi-byte character can straddle a chunk boundary,
  * and decoding each chunk independently would corrupt it.
  */
 export async function* readFrames(
