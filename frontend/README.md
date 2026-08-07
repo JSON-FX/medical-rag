@@ -1,36 +1,34 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Medical RAG — Frontend
 
-## Getting Started
+Next.js chat UI for the local medical RAG backend. Talks to Django directly at
+`http://localhost:8000` (override with `NEXT_PUBLIC_API_BASE`); there is no proxy layer, so the
+NDJSON stream reaches the browser unbuffered.
 
-First, run the development server:
+## Running it
 
-```bash
+The backend must be running first — see `../backend/README.md`.
+
+```
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Serves on `http://localhost:3000`, which is the origin Django's `CORS_ALLOWED_ORIGINS` already
+permits.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Pages
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `/` — chat. Answers stream token by token with source chips; questions the corpus can't support
+  render as decline cards rather than errors.
+- `/documents` — upload (PDF, 15 MB) and delete. Ingestion is synchronous, so upload holds until the
+  document is `ready` or `failed`.
 
-## Learn More
+## Tests
 
-To learn more about Next.js, take a look at the following resources:
+```
+npm test
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Vitest over `lib/` only. The two modules with real logic are pure: `ndjson.ts` (frame reassembly
+across stream chunks) and `chatReducer.ts` (frames to state, including decline classification). End
+-to-end coverage is Phase 5.

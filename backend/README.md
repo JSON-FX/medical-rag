@@ -83,6 +83,8 @@ mounted under `/api/`:
   frames as appropriate, always ending in one `done` frame
 - `GET  /api/chat/sessions/<id>/messages/`
 
+The browser UI lives in [`../frontend`](../frontend) and expects this server on port 8000.
+
 `/admin/` has `Document`, `Chunk`, `ChatSession` and `ChatMessage` registered (create a superuser
 first: `uv run python manage.py createsuperuser`) — `ChatMessage`'s list view surfaces
 `was_declined` / `decline_reason` directly, so gate decisions are inspectable without a shell.
