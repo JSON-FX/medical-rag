@@ -17,10 +17,12 @@
    ],
    "included_chars": 9930,
    "verified_absent": [
+    "carcinogen",
+    "driving",
     "geriatric",
-    "hepatic",
+    "immunization",
     "overdose",
-    "pregnancy"
+    "storage"
    ]
   },
   "atenolol": {
@@ -39,10 +41,13 @@
    ],
    "included_chars": 17155,
    "verified_absent": [
-    "hepatic",
+    "carcinogen",
+    "driving",
+    "immunization",
     "overdose",
     "pediatric",
-    "pregnancy"
+    "pregnancy",
+    "storage"
    ]
   },
   "amoxicillin": {
@@ -61,7 +66,11 @@
    ],
    "included_chars": 14596,
    "verified_absent": [
-    "geriatric"
+    "carcinogen",
+    "driving",
+    "geriatric",
+    "immunization",
+    "storage"
    ]
   }
  }

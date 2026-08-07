@@ -6,45 +6,37 @@ UNCONDITIONALLY regardless of what the gate would say at any threshold.
 That unconditional call is the point. Without it the sweep cannot answer
 "what would stage 2 have done if a lower tau_abstain had let this through?",
 which is exactly what the near_miss bucket exists to measure (spec 4.2).
-
-Getting that literally right needs one deviation from the obvious code:
-`retrieve()` returns no chunks when its gate declines, so calling it with the
-shipped defaults would silently skip the LLM for precisely the questions the
-sweep most needs stage-2 data about, and record them as `sentinel_fired: false`
-— making a permissive threshold look like it answers questions that stage 2
-would in fact have refused. Retrieval therefore runs with an open gate
-(tau_abstain = tau_strong = 0.0) so chunks always hydrate, and the shipped
-gate's verdict is computed afterwards from the same signals. That is sound for
-the same reason the whole sweep is: the signals are a property of the question
-and the corpus, not of the thresholds (spec 4.1).
-
-"The corpus" has to mean the eval corpus and nothing else. Chroma is sandboxed
-to a temp dir, but the lexical leg reads the shared FTS table, so this refuses
-to start against a database that already holds documents — see
-`require_empty_database`.
 """
 from __future__ import annotations
 
-import dataclasses
 import json
 import os
 import pathlib
 import tempfile
-
-import django
+from dataclasses import replace
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "medical_rag.settings")
+
+# Isolated database per run. The collect pass creates Documents, and without
+# this they accumulate: three corpus copies had built up, and duplicate chunks
+# tied in rank fusion and displaced a relevant chunk out of the top-k, which
+# refused a question that is genuinely answerable.
+_EVAL_DB_DIR = tempfile.mkdtemp(prefix="medical_rag_eval_")
+os.environ["DJANGO_DB_NAME"] = str(pathlib.Path(_EVAL_DB_DIR) / "eval.sqlite3")
+
+import django  # noqa: E402
+
 django.setup()
 
+from django.core.management import call_command  # noqa: E402
 import yaml  # noqa: E402
 from django.core.files.base import ContentFile  # noqa: E402
 
 from chat.retrieval import retrieve  # noqa: E402
 from documents.ingestion import ingest_document  # noqa: E402
 from documents.models import Document  # noqa: E402
-from evals.corpus import build_pdf, load_drug, load_manifest  # noqa: E402
-from rag.config import GateConfig, load_config  # noqa: E402
-from rag.gate import GateSignals, evaluate_gate  # noqa: E402
+from evals.corpus import FIXTURES, build_pdf, load_drug, load_manifest  # noqa: E402
+from rag.config import load_config  # noqa: E402
 from rag.embeddings import OllamaEmbedder  # noqa: E402
 from rag.generation import filter_sentinel, stream_chat  # noqa: E402
 from rag.prompts import build_messages  # noqa: E402
@@ -54,35 +46,10 @@ HERE = pathlib.Path(__file__).parent
 QUESTIONS = HERE / "questions.yaml"
 SIGNALS = HERE / "signals.json"
 
-OPEN_GATE = GateConfig(tau_abstain=0.0, tau_strong=0.0)
 
-DIRTY_DATABASE = """\
-refusing to run: {n} document(s) already exist in the database.
-
-Chroma is sandboxed to a temp dir for this pass, but the lexical leg is not:
-chat/lexical_search.py queries the chunk_fts table in the shared db.sqlite3,
-which holds the chunks of everything ever uploaded through /documents. Those
-chunks would match eval questions, enter RRF fusion, set `lexical_support`, and
-be hydrated into the LLM's context — so the signals this pass exists to measure
-would describe your own corpus as much as the eval corpus, and nothing in the
-output would say so.
-
-Delete the existing documents first (the Documents page, or `manage.py shell`),
-or point DJANGO_SETTINGS_MODULE at a scratch database, then re-run.\
-"""
-
-
-def require_empty_database() -> None:
-    """The eval corpus must be the ONLY corpus, or the measurement is meaningless."""
-    existing = Document.objects.count()
-    if existing:
-        raise SystemExit(DIRTY_DATABASE.format(n=existing))
-
-
-def ingest_corpus(store, embedder, cfg) -> tuple[int, list[int]]:
-    """Build a PDF per drug and ingest it. Returns (chunk total, document ids)."""
+def ingest_corpus(store, embedder, cfg) -> int:
+    """Build a PDF per drug and ingest it. Returns the chunk total."""
     total = 0
-    document_ids = []
     for slug in load_manifest()["drugs"]:
         with tempfile.TemporaryDirectory() as tmp:
             pdf = build_pdf(pathlib.Path(tmp) / f"{slug}.pdf", slug.title(),
@@ -94,8 +61,7 @@ def ingest_corpus(store, embedder, cfg) -> tuple[int, list[int]]:
             raise SystemExit(f"{slug} failed to ingest: {document.error_message}")
         print(f"  {slug:12} {document.chunk_count:3} chunks")
         total += document.chunk_count
-        document_ids.append(document.id)
-    return total, document_ids
+    return total
 
 
 def run_llm(question: str, chunks, cfg) -> tuple[bool, str]:
@@ -109,33 +75,9 @@ def run_llm(question: str, chunks, cfg) -> tuple[bool, str]:
     return False, "".join(collected)
 
 
-def _signals_from(payload: dict, question_id: str) -> GateSignals:
-    """Rebuild GateSignals from the recorded dict.
-
-    `as_dict` writes None for a non-finite similarity, which json can round-trip
-    but the sweep's arithmetic cannot. Real cosine distances never produce one;
-    if one appears the corpus is degenerate and the record would poison every
-    operating point, so fail loudly rather than cache a hole.
-    """
-    for key in ("top_similarity", "mean_similarity"):
-        if payload[key] is None:
-            raise SystemExit(f"{question_id}: {key} is non-finite — refusing to cache it")
-    return GateSignals(
-        top_similarity=payload["top_similarity"],
-        mean_similarity=payload["mean_similarity"],
-        lexical_support=payload["lexical_support"],
-        corpus_empty=payload["corpus_empty"],
-    )
-
-
 def main() -> None:
-    # Before anything expensive, and before anything is written.
-    require_empty_database()
-
+    call_command("migrate", verbosity=0)
     cfg = load_config()
-    # Retrieval must hydrate chunks for every question, including ones the
-    # shipped gate would refuse — see the module docstring.
-    open_cfg = dataclasses.replace(cfg, gate=OPEN_GATE)
     questions = yaml.safe_load(QUESTIONS.read_text())
 
     with tempfile.TemporaryDirectory() as chroma_dir:
@@ -143,53 +85,53 @@ def main() -> None:
         embedder = OllamaEmbedder(cfg.ollama)
 
         print("ingesting corpus...")
-        total, document_ids = ingest_corpus(store, embedder, cfg)
-        print(f"  {total} chunks total\n")
+        total = ingest_corpus(store, embedder, cfg)
+        print(f"  {total} chunks total across {Document.objects.count()} documents\n")
+
+        # The gate must not decide whether the model is called. Signals are
+        # threshold-independent, so retrieving with a permissive gate records
+        # the SAME signals while guaranteeing chunks hydrate for every
+        # question — which is what lets the sweep model "what would stage 2
+        # have done if a lower threshold had let this through?".
+        permissive = replace(cfg, gate=replace(cfg.gate, tau_abstain=-1.0, tau_strong=-1.0))
 
         records = []
-        try:
-            for i, q in enumerate(questions, start=1):
-                result = retrieve(q["question"], embedder, store, open_cfg)
-                signals = _signals_from(result.decision.signals, q["id"])
+        for i, q in enumerate(questions, start=1):
+            result = retrieve(q["question"], embedder, store, cfg)
+            forced = retrieve(q["question"], embedder, store, permissive)
+            signals = result.decision.signals
 
-                # Unconditional: we need stage 2's behaviour even where the
-                # shipped gate would have declined, so the sweep can model a
-                # lower threshold letting it by.
-                if result.chunks:
-                    sentinel_fired, answer = run_llm(q["question"], result.chunks, cfg)
-                else:
-                    sentinel_fired, answer = False, ""
+            # Unconditional: we need stage 2's behaviour even where the gate
+            # declined, so the sweep can model a lower threshold letting it by.
+            # retrieve() only hydrates chunks when ITS OWN gate proceeds, so
+            # calling it just once with the real config would silently skip
+            # the model whenever the default gate declines. The permissive
+            # retrieve forces chunks to hydrate regardless of that decision;
+            # `signals` and `gate_reason_at_defaults` still come from the
+            # real-config call above.
+            if forced.chunks:
+                sentinel_fired, answer = run_llm(q["question"], forced.chunks, cfg)
+            else:
+                sentinel_fired, answer = False, ""
 
-                shipped = evaluate_gate(signals, cfg.gate)
-                records.append({
-                    "id": q["id"],
-                    "bucket": q["bucket"],
-                    "expected": q["expected"],
-                    "drug": q.get("drug"),
-                    "axis": q.get("axis"),
-                    "top_similarity": signals.top_similarity,
-                    "mean_similarity": signals.mean_similarity,
-                    "lexical_support": signals.lexical_support,
-                    "corpus_empty": signals.corpus_empty,
-                    "gate_reason_at_defaults": shipped.reason,
-                    "sentinel_fired": sentinel_fired,
-                    "answer": answer[:400],
-                    "retrieved": [c.chunk_id for c in result.chunks],
-                })
-                print(f"  [{i:2}/{len(questions)}] {q['id']} {q['bucket']:19} "
-                      f"top={signals.top_similarity:.4f} lex={signals.lexical_support!s:5} "
-                      f"sentinel={sentinel_fired}")
-        finally:
-            # The eval corpus is scratch data in the developer's own database.
-            # Chroma lives in a temp dir and vanishes on its own; the SQLite
-            # rows would not, and would leave the dev corpus quietly non-empty.
-            # FileField.delete() is not called by Document.delete(), so the
-            # generated PDFs need removing explicitly — same reasoning as the
-            # delete view in documents/views.py.
-            for document in Document.objects.filter(id__in=document_ids):
-                if document.file:
-                    document.file.delete(save=False)
-                document.delete()
+            records.append({
+                "id": q["id"],
+                "bucket": q["bucket"],
+                "expected": q["expected"],
+                "drug": q.get("drug"),
+                "axis": q.get("axis"),
+                "top_similarity": signals["top_similarity"],
+                "mean_similarity": signals["mean_similarity"],
+                "lexical_support": signals["lexical_support"],
+                "corpus_empty": signals["corpus_empty"],
+                "gate_reason_at_defaults": result.decision.reason,
+                "sentinel_fired": sentinel_fired,
+                "answer": answer[:400],
+                "retrieved": [c.chunk_id for c in forced.chunks],
+            })
+            print(f"  [{i:2}/{len(questions)}] {q['id']} {q['bucket']:19} "
+                  f"top={signals['top_similarity']:.4f} lex={signals['lexical_support']!s:5} "
+                  f"sentinel={sentinel_fired}")
 
     SIGNALS.write_text(json.dumps(records, indent=1))
     print(f"\nwrote {SIGNALS} ({len(records)} records)")

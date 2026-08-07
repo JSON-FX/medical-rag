@@ -89,7 +89,10 @@ WSGI_APPLICATION = 'medical_rag.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        # Overridable so the eval harness can run against an isolated database.
+        # A measurement tool must not be polluted by dev data or by a previous
+        # run of itself — the collect pass appended a full corpus copy each time.
+        'NAME': os.environ.get('DJANGO_DB_NAME', BASE_DIR / 'db.sqlite3'),
     }
 }
 

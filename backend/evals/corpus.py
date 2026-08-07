@@ -36,24 +36,23 @@ def _paginate(text: str, chars_per_page: int = CHARS_PER_PAGE) -> list[str]:
 
 
 def assemble_text(included: dict[str, str]) -> str:
-    """One normalised string over the included sections, in a stable order.
-
-    Whitespace is collapsed before the axis scan runs over this text. A
-    multi-word keyword like "hepatic impairment" broken across a newline in the
-    source label would otherwise go undetected, marking an axis absent when it
-    is present — the exact near-miss corruption spec 2.2.1 exists to prevent.
-    """
+    """One normalised string over the included sections, in a stable order."""
     parts = []
     for key, title in SECTION_TITLES.items():
         body = included.get(key)
         if body:
-            parts.append(f"{title}\n{re.sub(r'\s+', ' ', body).strip()}")
+            parts.append(f"{title}\n{re.sub(r'\\s+', ' ', body).strip()}")
     return "\n\n".join(parts)
 
 
+def corpus_text(title: str, included: dict[str, str]) -> str:
+    """The exact string build_pdf renders — so the absence scan and the shipped
+    corpus can never disagree about what the document contains."""
+    return f"{title}\n\n{assemble_text(included)}"
+
+
 def build_pdf(path: pathlib.Path, title: str, included: dict[str, str]) -> pathlib.Path:
-    body = f"{title}\n\n{assemble_text(included)}"
-    return make_pdf(path, _paginate(body))
+    return make_pdf(path, _paginate(corpus_text(title, included)))
 
 
 def load_manifest() -> dict:

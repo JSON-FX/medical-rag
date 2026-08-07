@@ -15,7 +15,7 @@ import urllib.parse
 import urllib.request
 
 from evals.axes import verified_absent_axes
-from evals.corpus import FIXTURES, assemble_text
+from evals.corpus import FIXTURES, corpus_text
 
 DRUGS = {
     "metformin": "011de1a5-1ac0-4831-9e8d-26ec79ba2205",
@@ -46,6 +46,9 @@ def main() -> None:
     for slug, set_id in DRUGS.items():
         record = fetch(set_id)
         included = {s: record[s][0] for s in INCLUDE if record.get(s)}
+        missing = [s for s in INCLUDE if s not in included]
+        if missing:
+            raise SystemExit(f"{slug}: label is missing expected sections {missing}")
         withheld = {s: record[s][0] for s in WITHHOLD if record.get(s)}
         (FIXTURES / f"{slug}.json").write_text(
             json.dumps({"set_id": set_id, "included": included, "withheld": withheld}, indent=1)
@@ -57,7 +60,7 @@ def main() -> None:
             "included_chars": sum(len(v) for v in included.values()),
             # Measured over the text that actually ships, not inferred from
             # which sections were withheld (spec 2.2.1).
-            "verified_absent": verified_absent_axes(assemble_text(included)),
+            "verified_absent": verified_absent_axes(corpus_text(slug.title(), included)),
         }
         print(f"{slug:12} {manifest['drugs'][slug]['included_chars']:6} chars  "
               f"absent={manifest['drugs'][slug]['verified_absent']}")

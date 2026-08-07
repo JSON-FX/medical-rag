@@ -1,33 +1,62 @@
-"""The collect pass must measure the eval corpus and nothing else."""
-import pytest
+"""The collect pass must measure the eval corpus and nothing else.
 
-from documents.models import Document
+Chroma is sandboxed to a temp dir, but the lexical leg is not:
+`chat/lexical_search.py` reads the `chunk_fts` table in whatever database
+Django is configured with. Two things go wrong if that is the developer's
+`db.sqlite3` — chunks from anything uploaded through /documents match eval
+questions and enter RRF fusion, and the corpus the pass ingests itself
+accumulates across runs. The second one has already bitten: three corpus
+copies built up, duplicate chunks tied in rank fusion, and a genuinely
+answerable question was refused.
 
-pytestmark = pytest.mark.django_db
+`evals/collect.py` fixes both by pointing DJANGO_DB_NAME at a fresh temp
+database before `django.setup()`. That ordering is the whole mechanism, so it
+is what this test pins.
+"""
+import pathlib
+import subprocess
+import sys
+
+BACKEND = pathlib.Path(__file__).resolve().parents[2]
+
+# Import the module and report the database Django actually ended up with.
+# A subprocess is required: importing evals.collect mutates os.environ and
+# calls django.setup(), which cannot be re-run inside an already-configured
+# pytest process — and doing so would leak the temp database into every test
+# that followed. Importing does not run the pass; main() is __main__-guarded.
+PROBE = """
+import evals.collect  # noqa: F401  — sets DJANGO_DB_NAME, then django.setup()
+from django.conf import settings
+print(settings.DATABASES["default"]["NAME"])
+"""
 
 
-def test_collect_refuses_to_run_against_a_populated_database():
-    """Chroma is sandboxed to a temp dir for the collect pass, but the lexical
-    leg is not: chat/lexical_search.py reads the chunk_fts table in the shared
-    db.sqlite3. Chunks from anything a developer uploaded through /documents
-    would match eval questions, enter RRF fusion, set `lexical_support`, and be
-    hydrated into the LLM's context — corrupting the measurement the whole
-    phase exists to produce, without a word in the output to say so.
-
-    Asserting on main() rather than on the helper is deliberate: the guard has
-    to fire before the config load, the ingest and the first Ollama call.
-    """
-    from evals.collect import main
-
-    Document.objects.create(title="a-doc-i-uploaded-earlier.pdf", status="ready")
-
-    with pytest.raises(SystemExit) as raised:
-        main()
-    assert "refusing to run" in str(raised.value)
-    assert "chunk_fts" in str(raised.value), "the message must explain WHY"
+def _configured_database() -> str:
+    result = subprocess.run(
+        [sys.executable, "-c", PROBE],
+        cwd=BACKEND,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, f"probe failed:\n{result.stderr}"
+    return result.stdout.strip().splitlines()[-1]
 
 
-def test_the_guard_is_silent_on_an_empty_database():
-    from evals.collect import require_empty_database
+def test_collect_runs_against_an_isolated_database_not_the_developers():
+    configured = pathlib.Path(_configured_database())
+    dev_database = BACKEND / "db.sqlite3"
 
-    require_empty_database()
+    assert configured != dev_database, (
+        "the collect pass would read and write the developer's own database; "
+        "uploaded documents would contaminate the lexical leg"
+    )
+    assert not configured.is_relative_to(BACKEND), (
+        f"{configured} is inside the repo — the pass must use a temp database"
+    )
+
+
+def test_the_isolated_database_is_fresh_per_run():
+    """Two runs must not share a database, or the corpus accumulates and
+    duplicate chunks displace a relevant chunk out of the top-k."""
+    assert _configured_database() != _configured_database()

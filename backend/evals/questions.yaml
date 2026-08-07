@@ -38,29 +38,28 @@
 - {id: a14, bucket: answerable, expected: answer, drug: metformin,
    question: "What drug interactions are described for metformin?"}
 
-# ---------- near_miss (9) — every pair verified absent in the manifest ----------
-- {id: n01, bucket: near_miss, expected: decline, drug: metformin, axis: hepatic,
-   question: "How should metformin be dosed in patients with hepatic impairment?"}
-- {id: n02, bucket: near_miss, expected: decline, drug: atenolol, axis: hepatic,
-   question: "Does atenolol require a dose adjustment in liver impairment?"}
-# n03 was amoxicillin/hepatic in the plan. Measurement says otherwise: the
-# shipped ADVERSE REACTIONS section reads "Hepatic dysfunction including
-# cholestatic jaundice", so that question is answerable and cannot be a
-# near-miss. Swapped to amoxicillin/geriatric, which the manifest verifies absent.
-- {id: n03, bucket: near_miss, expected: decline, drug: amoxicillin, axis: geriatric,
-   question: "What is the amoxicillin dose for elderly patients?"}
-- {id: n04, bucket: near_miss, expected: decline, drug: metformin, axis: overdose,
+# ---------- near_miss (9) — every pair verified absent by STEM scan ----------
+- {id: n01, bucket: near_miss, expected: decline, drug: metformin, axis: overdose,
    question: "What should be done in the event of a metformin overdose?"}
-- {id: n05, bucket: near_miss, expected: decline, drug: atenolol, axis: overdose,
+- {id: n02, bucket: near_miss, expected: decline, drug: atenolol, axis: overdose,
    question: "How is an atenolol overdose managed?"}
-- {id: n06, bucket: near_miss, expected: decline, drug: metformin, axis: pregnancy,
-   question: "Is metformin safe to use during pregnancy?"}
-- {id: n07, bucket: near_miss, expected: decline, drug: atenolol, axis: pregnancy,
-   question: "Can atenolol be taken while breastfeeding?"}
-- {id: n08, bucket: near_miss, expected: decline, drug: atenolol, axis: pediatric,
+# n03/n08 use peripheral axes deliberately: clinically-central near-misses on this
+# corpus proved answerable BY INFERENCE from a different, present axis. Metformin's
+# dosing is entirely eGFR-gated, which IS the elderly-dosing answer.
+- {id: n03, bucket: near_miss, expected: decline, drug: metformin, axis: storage,
+   question: "How should metformin tablets be stored?"}
+- {id: n04, bucket: near_miss, expected: decline, drug: amoxicillin, axis: geriatric,
+   question: "Does amoxicillin need a dose adjustment in elderly patients?"}
+- {id: n05, bucket: near_miss, expected: decline, drug: atenolol, axis: pediatric,
    question: "What is the pediatric dose of atenolol?"}
-- {id: n09, bucket: near_miss, expected: decline, drug: metformin, axis: geriatric,
-   question: "How should metformin be dosed in elderly patients?"}
+- {id: n06, bucket: near_miss, expected: decline, drug: atenolol, axis: pregnancy,
+   question: "Can atenolol be taken while breastfeeding?"}
+- {id: n07, bucket: near_miss, expected: decline, drug: metformin, axis: carcinogen,
+   question: "Is metformin associated with an increased cancer risk?"}
+- {id: n08, bucket: near_miss, expected: decline, drug: atenolol, axis: carcinogen,
+   question: "Is long-term atenolol use associated with an increased cancer risk?"}
+- {id: n09, bucket: near_miss, expected: decline, drug: amoxicillin, axis: immunization,
+   question: "Does amoxicillin reduce the effectiveness of vaccines?"}
 
 # ---------- off_corpus_medical (9) — real drugs, none in the corpus ----------
 - {id: o01, bucket: off_corpus_medical, expected: decline,
@@ -73,8 +72,10 @@
    question: "What is the maximum daily dose of ibuprofen?"}
 - {id: o05, bucket: off_corpus_medical, expected: decline,
    question: "What are the side effects of atorvastatin?"}
+# o06 avoids naming a drug CLASS the corpus belongs to — amoxicillin's text says
+# "penicillin" five times, so the original question collided lexically.
 - {id: o06, bucket: off_corpus_medical, expected: decline,
-   question: "When should azithromycin be used instead of penicillin?"}
+   question: "What is the recommended dose of ondansetron for nausea?"}
 - {id: o07, bucket: off_corpus_medical, expected: decline,
    question: "What is the reversal agent for heparin?"}
 - {id: o08, bucket: off_corpus_medical, expected: decline,
