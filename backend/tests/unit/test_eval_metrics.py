@@ -100,17 +100,57 @@ def test_choose_best_falls_back_when_every_point_has_a_false_decline():
     assert choose_best([only]) is only
 
 
+REPLAY_RECORDS = [
+    rec("answerable", "answer", 0.90, True, False, "a1"),
+    rec("near_miss", "decline", 0.80, True, True, "n1"),
+    rec("off_domain", "decline", 0.35, False, False, "d1"),
+]
+
+
 def test_sweep_is_a_pure_replay():
     """The same records must produce identical points every run, or the
     committed results are not reproducible."""
     from evals.sweep import sweep
 
-    records = [
-        rec("answerable", "answer", 0.90, True, False, "a1"),
-        rec("near_miss", "decline", 0.80, True, True, "n1"),
-        rec("off_domain", "decline", 0.35, False, False, "d1"),
-    ]
-    assert sweep(records) == sweep(records)
+    assert sweep(REPLAY_RECORDS) == sweep(REPLAY_RECORDS)
+
+
+def test_sweep_output_is_pinned_to_the_records_alone():
+    """Two in-process calls agreeing proves determinism, not independence: a
+    sweep that read GateConfig() or an environment variable would still agree
+    with itself and still stop reproducing the moment production config moved.
+    That is precisely the risk sweep.py's PLACEHOLDERS constant exists to
+    guard, so the expected values are written out here as literals.
+
+    The three chosen points also have to disagree with each other, or a
+    degenerate sweep would satisfy all of them at once.
+    """
+    from evals.sweep import sweep
+
+    points = {(p.tau_abstain, p.tau_strong): p for p in sweep(REPLAY_RECORDS)}
+
+    # Permissive: off_domain at 0.35 clears the gate and the sentinel never
+    # fires for it, so it is answered — half the declines that should happen.
+    permissive = points[(0.20, 0.25)]
+    assert (permissive.declined, permissive.correct_declines) == (1, 1)
+    assert (permissive.should_decline, permissive.recall) == (2, 0.5)
+    assert (permissive.stage1_declines, permissive.stage2_declines) == (0, 1)
+    assert permissive.llm_calls_avoided == 0
+
+    # Balanced: off_domain is now below tau_abstain and dies at stage 1, the
+    # near-miss still needs the model to catch it.
+    balanced = points[(0.40, 0.45)]
+    assert (balanced.declined, balanced.correct_declines) == (2, 2)
+    assert (balanced.false_declines, balanced.recall) == (0, 1.0)
+    assert (balanced.stage1_declines, balanced.stage2_declines) == (1, 1)
+    assert (balanced.llm_calls_avoided, balanced.near_miss_stage2) == (1, 1)
+
+    # Strict: tau_abstain now sits above the near-miss too, so stage 1 catches
+    # it and the model is never called for either decline.
+    strict = points[(0.85, 0.90)]
+    assert (strict.declined, strict.false_declines) == (2, 0)
+    assert (strict.stage1_declines, strict.stage2_declines) == (2, 0)
+    assert (strict.llm_calls_avoided, strict.near_miss_stage1) == (2, 1)
 
 
 def test_grid_only_contains_valid_threshold_pairs():
